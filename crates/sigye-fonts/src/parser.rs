@@ -130,12 +130,13 @@ fn parse_character<'a>(
         let line = lines.next().ok_or(ParseError::UnexpectedEndOfFile)?;
 
         // Remove end markers (@ or @@)
+        // TLF format may have trailing whitespace after @ markers, so trim whitespace first
         let cleaned = if i == height - 1 {
             // Last line ends with @@
-            line.trim_end_matches('@')
+            line.trim_end().trim_end_matches('@')
         } else {
             // Other lines end with @
-            line.trim_end_matches('@')
+            line.trim_end().trim_end_matches('@')
         };
 
         // Replace hardblank with space

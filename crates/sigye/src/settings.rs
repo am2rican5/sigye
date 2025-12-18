@@ -227,10 +227,9 @@ impl SettingsDialog {
         frame.render_widget(Paragraph::new(font_line).alignment(Alignment::Center), chunks[1]);
 
         // Render color field
-        let color_name = format!("{:?}", self.color_theme);
         let color_line = self.render_field(
             "Color",
-            &color_name,
+            self.color_theme.display_name(),
             self.selected_field == SettingsField::Color,
             accent_color,
         );

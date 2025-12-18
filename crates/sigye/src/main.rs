@@ -9,7 +9,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use ratatui::{
     layout::{Alignment, Constraint, Layout},
     style::{Style, Stylize},
-    text::Line,
+    text::{Line, Span},
     widgets::Paragraph,
     DefaultTerminal, Frame,
 };
@@ -140,19 +140,57 @@ impl App {
         .split(area);
 
         // Render big time
-        let time_text: Vec<Line> = time_lines
-            .into_iter()
-            .map(|s| Line::from(s).style(Style::new().fg(color)))
-            .collect();
+        let height = time_lines.len();
+        let width = time_lines.first().map(|s| s.len()).unwrap_or(0);
+
+        let time_text: Vec<Line> = if self.color_theme.is_dynamic() {
+            // Apply per-character coloring for dynamic themes
+            time_lines
+                .into_iter()
+                .enumerate()
+                .map(|(y, line)| {
+                    let spans: Vec<Span> = line
+                        .chars()
+                        .enumerate()
+                        .map(|(x, ch)| {
+                            let char_color =
+                                self.color_theme.color_at_position(x, y, width, height);
+                            Span::styled(ch.to_string(), Style::new().fg(char_color))
+                        })
+                        .collect();
+                    Line::from(spans)
+                })
+                .collect()
+        } else {
+            // Static color for the whole text
+            time_lines
+                .into_iter()
+                .map(|s| Line::from(s).style(Style::new().fg(color)))
+                .collect()
+        };
 
         let time_widget = Paragraph::new(time_text).alignment(Alignment::Center);
         frame.render_widget(time_widget, chunks[1]);
 
-        // Render date
-        let date = Paragraph::new(date_str)
-            .style(Style::new().fg(color))
-            .alignment(Alignment::Center);
-        frame.render_widget(date, chunks[3]);
+        // Render date (also with dynamic colors if applicable)
+        let date_widget = if self.color_theme.is_dynamic() {
+            let date_spans: Vec<Span> = date_str
+                .chars()
+                .enumerate()
+                .map(|(x, ch)| {
+                    let char_color =
+                        self.color_theme
+                            .color_at_position(x, 0, date_str.len(), 1);
+                    Span::styled(ch.to_string(), Style::new().fg(char_color))
+                })
+                .collect();
+            Paragraph::new(Line::from(date_spans)).alignment(Alignment::Center)
+        } else {
+            Paragraph::new(date_str)
+                .style(Style::new().fg(color))
+                .alignment(Alignment::Center)
+        };
+        frame.render_widget(date_widget, chunks[3]);
 
         // Render help text
         let help = Line::from(vec![

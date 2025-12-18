@@ -1,9 +1,10 @@
 //! Core types for the sigye clock application.
 
 use ratatui::style::Color;
+use serde::{Deserialize, Serialize};
 
 /// Time format for the clock display.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeFormat {
     #[default]
     TwentyFourHour,
@@ -21,7 +22,7 @@ impl TimeFormat {
 }
 
 /// Color theme for the clock display.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColorTheme {
     #[default]
     Cyan,
@@ -44,6 +45,19 @@ impl ColorTheme {
             ColorTheme::Red => ColorTheme::Blue,
             ColorTheme::Blue => ColorTheme::White,
             ColorTheme::White => ColorTheme::Cyan,
+        }
+    }
+
+    /// Cycle to the previous color theme.
+    pub fn prev(&self) -> Self {
+        match self {
+            ColorTheme::Cyan => ColorTheme::White,
+            ColorTheme::Green => ColorTheme::Cyan,
+            ColorTheme::Magenta => ColorTheme::Green,
+            ColorTheme::Yellow => ColorTheme::Magenta,
+            ColorTheme::Red => ColorTheme::Yellow,
+            ColorTheme::Blue => ColorTheme::Red,
+            ColorTheme::White => ColorTheme::Blue,
         }
     }
 

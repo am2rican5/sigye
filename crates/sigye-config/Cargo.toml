@@ -1,0 +1,13 @@
+[package]
+name = "sigye-config"
+description = "Configuration management for sigye clock app"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+sigye-core.workspace = true
+serde.workspace = true
+toml.workspace = true
+directories.workspace = true

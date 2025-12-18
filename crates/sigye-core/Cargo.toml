@@ -8,3 +8,4 @@ edition.workspace = true
 
 [dependencies]
 ratatui.workspace = true
+serde.workspace = true

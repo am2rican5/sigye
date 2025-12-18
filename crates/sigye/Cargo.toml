@@ -8,6 +8,7 @@ edition.workspace = true
 
 [dependencies]
 sigye-core.workspace = true
+sigye-config.workspace = true
 sigye-fonts.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true

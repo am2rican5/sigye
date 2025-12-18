@@ -13,8 +13,12 @@ ratatui = "0.29.0"
 crossterm = "0.29"
 chrono = "0.4"
 color-eyre = "0.6"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+directories = "5.0"
 sigye-core = { path = "crates/sigye-core" }
 sigye-fonts = { path = "crates/sigye-fonts" }
+sigye-config = { path = "crates/sigye-config" }
 
 [profile.release]
 codegen-units = 1

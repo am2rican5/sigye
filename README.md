@@ -7,6 +7,8 @@
 
 A beautiful terminal clock with ASCII art fonts.
 
+![sigye demo](assets/demo.gif)
+
 ## Features
 
 - **40 bundled FIGlet fonts** - From classic Standard to stylish Star Wars

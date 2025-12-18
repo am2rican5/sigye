@@ -8,7 +8,7 @@ mod parser;
 mod registry;
 
 pub use font::Font;
-pub use parser::{parse_flf, ParseError};
+pub use parser::{ParseError, parse_flf};
 pub use registry::FontRegistry;
 
 // Re-export bundled font constants for direct access

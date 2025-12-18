@@ -7,6 +7,9 @@ version = "0.1.0"
 authors = ["am2rican5 <am2rican5@gmail.com>"]
 license = "MIT"
 edition = "2024"
+repository = "https://github.com/am2rican5/sigye"
+homepage = "https://github.com/am2rican5/sigye"
+readme = "README.md"
 
 [workspace.dependencies]
 ratatui = "0.29.0"

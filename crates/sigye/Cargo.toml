@@ -1,10 +1,15 @@
 [package]
 name = "sigye"
-description = "A clock app for terminal"
+description = "A beautiful terminal clock with ASCII art fonts"
 version.workspace = true
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["cli", "clock", "terminal", "tui", "figlet"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 sigye-core.workspace = true

@@ -60,9 +60,6 @@ pub const OGRE_FLF: &str = include_str!("../../../fonts/Ogre.flf");
 /// Poison font - toxic/poison style.
 pub const POISON_FLF: &str = include_str!("../../../fonts/Poison.flf");
 
-/// Roman font - classical Roman style.
-pub const ROMAN_FLF: &str = include_str!("../../../fonts/Roman.flf");
-
 /// Script font - cursive handwriting style.
 pub const SCRIPT_FLF: &str = include_str!("../../../fonts/Script.flf");
 
@@ -145,7 +142,6 @@ pub const BUNDLED_FONTS: &[(&str, &str)] = &[
     ("Mini", MINI_FLF),
     ("Ogre", OGRE_FLF),
     ("Poison", POISON_FLF),
-    ("Roman", ROMAN_FLF),
     ("Script", SCRIPT_FLF),
     ("Shadow", SHADOW_FLF),
     ("Slant", SLANT_FLF),

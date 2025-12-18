@@ -1,11 +1,11 @@
 //! Settings dialog widget for configuring the clock.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 use sigye_core::{ColorTheme, TimeFormat};
 
@@ -224,7 +224,10 @@ impl SettingsDialog {
             self.selected_field == SettingsField::Font,
             accent_color,
         );
-        frame.render_widget(Paragraph::new(font_line).alignment(Alignment::Center), chunks[1]);
+        frame.render_widget(
+            Paragraph::new(font_line).alignment(Alignment::Center),
+            chunks[1],
+        );
 
         // Render color field
         let color_line = self.render_field(
@@ -233,7 +236,10 @@ impl SettingsDialog {
             self.selected_field == SettingsField::Color,
             accent_color,
         );
-        frame.render_widget(Paragraph::new(color_line).alignment(Alignment::Center), chunks[3]);
+        frame.render_widget(
+            Paragraph::new(color_line).alignment(Alignment::Center),
+            chunks[3],
+        );
 
         // Render time format field
         let time_format_name = match self.time_format {
@@ -246,7 +252,10 @@ impl SettingsDialog {
             self.selected_field == SettingsField::TimeFormat,
             accent_color,
         );
-        frame.render_widget(Paragraph::new(time_line).alignment(Alignment::Center), chunks[5]);
+        frame.render_widget(
+            Paragraph::new(time_line).alignment(Alignment::Center),
+            chunks[5],
+        );
 
         // Render help text
         let help = Line::from(vec![

@@ -90,9 +90,9 @@ impl ColorTheme {
             ColorTheme::Red => Color::Red,
             ColorTheme::Blue => Color::Blue,
             // Dynamic themes return a default color for backward compatibility
-            ColorTheme::Rainbow
-            | ColorTheme::RainbowVertical
-            | ColorTheme::GradientNeon => Color::Magenta,
+            ColorTheme::Rainbow | ColorTheme::RainbowVertical | ColorTheme::GradientNeon => {
+                Color::Magenta
+            }
             ColorTheme::GradientWarm | ColorTheme::GradientFire => Color::Red,
             ColorTheme::GradientCool | ColorTheme::GradientOcean => Color::Cyan,
         }

@@ -7,11 +7,11 @@ use std::time::Duration;
 use chrono::Local;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
+    DefaultTerminal, Frame,
     layout::{Alignment, Constraint, Layout},
     style::{Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
-    DefaultTerminal, Frame,
 };
 use sigye_config::Config;
 use sigye_core::{ColorTheme, TimeFormat};
@@ -130,12 +130,12 @@ impl App {
 
         // Create vertical layout for centering
         let chunks = Layout::vertical([
-            Constraint::Fill(1),              // Top padding
-            Constraint::Length(font_height),  // Big digits (dynamic height)
-            Constraint::Length(2),            // Spacing
-            Constraint::Length(1),            // Date
-            Constraint::Fill(1),              // Bottom padding
-            Constraint::Length(1),            // Help text
+            Constraint::Fill(1),             // Top padding
+            Constraint::Length(font_height), // Big digits (dynamic height)
+            Constraint::Length(2),           // Spacing
+            Constraint::Length(1),           // Date
+            Constraint::Fill(1),             // Bottom padding
+            Constraint::Length(1),           // Help text
         ])
         .split(area);
 
@@ -178,9 +178,7 @@ impl App {
                 .chars()
                 .enumerate()
                 .map(|(x, ch)| {
-                    let char_color =
-                        self.color_theme
-                            .color_at_position(x, 0, date_str.len(), 1);
+                    let char_color = self.color_theme.color_at_position(x, 0, date_str.len(), 1);
                     Span::styled(ch.to_string(), Style::new().fg(char_color))
                 })
                 .collect();

@@ -65,7 +65,8 @@ impl Config {
         fs::create_dir_all(&config_dir).map_err(|e| ConfigError::Io(e.to_string()))?;
 
         let config_path = Self::config_file_path();
-        let contents = toml::to_string_pretty(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
+        let contents =
+            toml::to_string_pretty(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
 
         fs::write(&config_path, contents).map_err(|e| ConfigError::Io(e.to_string()))?;
 

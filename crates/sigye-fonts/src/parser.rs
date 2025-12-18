@@ -89,7 +89,9 @@ fn parse_header(line: &str) -> Result<FlfHeader, ParseError> {
 
     let parts: Vec<&str> = line[signature_len + 1..].split_whitespace().collect();
     if parts.len() < 5 {
-        return Err(ParseError::InvalidHeader("Not enough header fields".to_string()));
+        return Err(ParseError::InvalidHeader(
+            "Not enough header fields".to_string(),
+        ));
     }
 
     let height = parts[0]

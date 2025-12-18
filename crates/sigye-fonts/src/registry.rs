@@ -54,28 +54,29 @@ impl FontRegistry {
             let path = entry.path();
 
             if path.extension().is_some_and(|ext| ext == "flf")
-                && let Some(stem) = path.file_stem() {
-                    let name = stem.to_string_lossy().to_string();
+                && let Some(stem) = path.file_stem()
+            {
+                let name = stem.to_string_lossy().to_string();
 
-                    // Skip if already loaded (bundled fonts take precedence)
-                    if self.fonts.contains_key(&name) {
-                        continue;
-                    }
+                // Skip if already loaded (bundled fonts take precedence)
+                if self.fonts.contains_key(&name) {
+                    continue;
+                }
 
-                    match fs::read_to_string(&path) {
-                        Ok(content) => match parse_flf(&name, &content) {
-                            Ok(font) => {
-                                self.fonts.insert(name, font);
-                            }
-                            Err(e) => {
-                                eprintln!("Warning: Failed to parse font '{}': {e}", path.display());
-                            }
-                        },
-                        Err(e) => {
-                            eprintln!("Warning: Failed to read font '{}': {e}", path.display());
+                match fs::read_to_string(&path) {
+                    Ok(content) => match parse_flf(&name, &content) {
+                        Ok(font) => {
+                            self.fonts.insert(name, font);
                         }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to parse font '{}': {e}", path.display());
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Warning: Failed to read font '{}': {e}", path.display());
                     }
                 }
+            }
         }
     }
 

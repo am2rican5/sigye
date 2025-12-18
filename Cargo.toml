@@ -19,9 +19,9 @@ color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 directories = "5.0"
-sigye-core = { path = "crates/sigye-core" }
-sigye-fonts = { path = "crates/sigye-fonts" }
-sigye-config = { path = "crates/sigye-config" }
+sigye-core = { version = "0.1.0", path = "crates/sigye-core" }
+sigye-fonts = { version = "0.1.0", path = "crates/sigye-fonts" }
+sigye-config = { version = "0.1.0", path = "crates/sigye-config" }
 
 [profile.release]
 codegen-units = 1

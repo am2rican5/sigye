@@ -1,7 +1,6 @@
 # sigye
 
 [![Crates.io](https://img.shields.io/crates/v/sigye)](https://crates.io/crates/sigye)
-[![Downloads](https://img.shields.io/crates/d/sigye)](https://crates.io/crates/sigye)
 [![License](https://img.shields.io/crates/l/sigye)](https://github.com/am2rican5/sigye/blob/main/LICENSE)
 [![Built with Ratatui](https://img.shields.io/badge/built%20with-ratatui-blue)](https://ratatui.rs)
 

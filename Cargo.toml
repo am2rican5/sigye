@@ -17,7 +17,7 @@ crossterm = "0.29"
 chrono = "0.4"
 color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
+toml = "0.9"
 directories = "6.0"
 sigye-core = { version = "0.1.0", path = "crates/sigye-core" }
 sigye-fonts = { version = "0.1.0", path = "crates/sigye-fonts" }

@@ -12,6 +12,8 @@ A beautiful terminal clock with ASCII art fonts.
 
 - **40 bundled FIGlet fonts** - From classic Standard to stylish Star Wars
 - **14 color themes** - Including rainbow and gradient effects
+- **Animated themes** - Shifting, pulsing, wave, and reactive effects
+- **Blinking colon** - Optional colon separator animation
 - **12/24 hour format** - Toggle with a single keypress
 - **Live settings preview** - See changes before saving
 - **Persistent configuration** - Settings saved automatically
@@ -46,6 +48,7 @@ sigye
 | `q` / `Esc` | Quit |
 | `t` | Toggle 12/24 hour format |
 | `c` | Cycle color theme |
+| `a` | Cycle animation style |
 | `s` | Open settings dialog |
 
 ### Settings Dialog
@@ -67,6 +70,9 @@ Configuration is stored at `~/.config/sigye/config.toml`:
 font_name = "Standard"
 color_theme = "Cyan"
 time_format = "TwentyFourHour"
+animation_style = "None"
+animation_speed = "Medium"
+colon_blink = false
 ```
 
 ### Custom Fonts
@@ -86,6 +92,18 @@ Cyan, Green, White, Magenta, Yellow, Red, Blue
 - **Ocean** - Dark blue to Cyan to Teal
 - **Neon** - Magenta to Cyan (synthwave)
 - **Fire** - Red to Orange to Yellow
+
+## Animations
+
+### Animation Styles
+- **None** - Static display (default)
+- **Shifting** - Color hue shifts over time
+- **Pulsing** - Brightness pulses rhythmically
+- **Wave** - Color wave moves across the display
+- **Reactive** - Responds to time changes
+
+### Animation Speeds
+Slow, Medium (default), Fast
 
 ## Bundled Fonts
 

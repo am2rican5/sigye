@@ -235,9 +235,8 @@ impl App {
 
                             // Apply colon blink by hiding colon characters during "off" phase
                             let is_colon = colon_positions.get(x).copied().unwrap_or(false);
-                            let should_hide = self.colon_blink
-                                && is_colon
-                                && !is_colon_visible(elapsed_ms);
+                            let should_hide =
+                                self.colon_blink && is_colon && !is_colon_visible(elapsed_ms);
 
                             if should_hide {
                                 // Replace with space to hide colon (works on any terminal theme)

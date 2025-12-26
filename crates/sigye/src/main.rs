@@ -195,7 +195,7 @@ impl App {
 
         // Render big time
         let height = time_lines.len();
-        let width = time_lines.first().map(|s| s.len()).unwrap_or(0);
+        let width = time_lines.first().map(|s| s.chars().count()).unwrap_or(0);
 
         // Build colon position mask for blink effect
         // Maps x-positions in rendered ASCII art back to colon characters in time_str

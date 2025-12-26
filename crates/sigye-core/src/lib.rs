@@ -78,6 +78,60 @@ impl AnimationStyle {
     }
 }
 
+/// Background animation style for the terminal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackgroundStyle {
+    #[default]
+    None,
+    Starfield,
+    MatrixRain,
+    GradientWave,
+}
+
+/// All background styles for cycling.
+const ALL_BACKGROUND_STYLES: &[BackgroundStyle] = &[
+    BackgroundStyle::None,
+    BackgroundStyle::Starfield,
+    BackgroundStyle::MatrixRain,
+    BackgroundStyle::GradientWave,
+];
+
+impl BackgroundStyle {
+    /// Cycle to the next background style.
+    pub fn next(&self) -> Self {
+        let current_idx = ALL_BACKGROUND_STYLES
+            .iter()
+            .position(|s| s == self)
+            .unwrap_or(0);
+        let next_idx = (current_idx + 1) % ALL_BACKGROUND_STYLES.len();
+        ALL_BACKGROUND_STYLES[next_idx]
+    }
+
+    /// Cycle to the previous background style.
+    pub fn prev(&self) -> Self {
+        let current_idx = ALL_BACKGROUND_STYLES
+            .iter()
+            .position(|s| s == self)
+            .unwrap_or(0);
+        let prev_idx = if current_idx == 0 {
+            ALL_BACKGROUND_STYLES.len() - 1
+        } else {
+            current_idx - 1
+        };
+        ALL_BACKGROUND_STYLES[prev_idx]
+    }
+
+    /// Get display name for the background style.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            BackgroundStyle::None => "None",
+            BackgroundStyle::Starfield => "Starfield",
+            BackgroundStyle::MatrixRain => "Matrix",
+            BackgroundStyle::GradientWave => "Gradient",
+        }
+    }
+}
+
 /// Animation speed setting.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnimationSpeed {
@@ -161,6 +215,33 @@ impl AnimationSpeed {
             AnimationSpeed::Slow => 800,
             AnimationSpeed::Medium => 400,
             AnimationSpeed::Fast => 200,
+        }
+    }
+
+    /// Get the star twinkle period in milliseconds.
+    pub fn star_twinkle_period_ms(self) -> u64 {
+        match self {
+            AnimationSpeed::Slow => 500,
+            AnimationSpeed::Medium => 300,
+            AnimationSpeed::Fast => 150,
+        }
+    }
+
+    /// Get the matrix rain fall speed multiplier.
+    pub fn matrix_fall_speed(self) -> f32 {
+        match self {
+            AnimationSpeed::Slow => 0.5,
+            AnimationSpeed::Medium => 1.0,
+            AnimationSpeed::Fast => 2.0,
+        }
+    }
+
+    /// Get the gradient scroll period in milliseconds.
+    pub fn gradient_scroll_period_ms(self) -> u64 {
+        match self {
+            AnimationSpeed::Slow => 5000,
+            AnimationSpeed::Medium => 3000,
+            AnimationSpeed::Fast => 1500,
         }
     }
 }

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use sigye_core::{AnimationSpeed, AnimationStyle, ColorTheme, TimeFormat};
+use sigye_core::{AnimationSpeed, AnimationStyle, BackgroundStyle, ColorTheme, TimeFormat};
 
 /// Application configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +33,10 @@ pub struct Config {
     /// Whether colon blinks.
     #[serde(default)]
     pub colon_blink: bool,
+
+    /// Background animation style.
+    #[serde(default)]
+    pub background_style: BackgroundStyle,
 }
 
 fn default_font() -> String {
@@ -48,6 +52,7 @@ impl Default for Config {
             animation_style: AnimationStyle::default(),
             animation_speed: AnimationSpeed::default(),
             colon_blink: false,
+            background_style: BackgroundStyle::default(),
         }
     }
 }

@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-use sigye_core::{AnimationSpeed, AnimationStyle, ColorTheme, TimeFormat};
+use sigye_core::{AnimationSpeed, AnimationStyle, BackgroundStyle, ColorTheme, TimeFormat};
 
 /// The settings field currently being edited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -18,6 +18,7 @@ pub enum SettingsField {
     TimeFormat,
     Animation,
     Speed,
+    Background,
     ColonBlink,
 }
 
@@ -29,7 +30,8 @@ impl SettingsField {
             Self::Color => Self::TimeFormat,
             Self::TimeFormat => Self::Animation,
             Self::Animation => Self::Speed,
-            Self::Speed => Self::ColonBlink,
+            Self::Speed => Self::Background,
+            Self::Background => Self::ColonBlink,
             Self::ColonBlink => Self::Font,
         }
     }
@@ -42,7 +44,8 @@ impl SettingsField {
             Self::TimeFormat => Self::Color,
             Self::Animation => Self::TimeFormat,
             Self::Speed => Self::Animation,
-            Self::ColonBlink => Self::Speed,
+            Self::Background => Self::Speed,
+            Self::ColonBlink => Self::Background,
         }
     }
 }
@@ -66,6 +69,8 @@ pub struct SettingsDialog {
     pub animation_style: AnimationStyle,
     /// Current animation speed selection.
     pub animation_speed: AnimationSpeed,
+    /// Current background style selection.
+    pub background_style: BackgroundStyle,
     /// Current colon blink setting.
     pub colon_blink: bool,
     /// Original font index (for cancel/revert).
@@ -78,6 +83,8 @@ pub struct SettingsDialog {
     original_animation_style: AnimationStyle,
     /// Original animation speed (for cancel/revert).
     original_animation_speed: AnimationSpeed,
+    /// Original background style (for cancel/revert).
+    original_background_style: BackgroundStyle,
     /// Original colon blink (for cancel/revert).
     original_colon_blink: bool,
 }
@@ -94,12 +101,14 @@ impl SettingsDialog {
             time_format: TimeFormat::default(),
             animation_style: AnimationStyle::default(),
             animation_speed: AnimationSpeed::default(),
+            background_style: BackgroundStyle::default(),
             colon_blink: false,
             original_font_index: 0,
             original_color_theme: ColorTheme::default(),
             original_time_format: TimeFormat::default(),
             original_animation_style: AnimationStyle::default(),
             original_animation_speed: AnimationSpeed::default(),
+            original_background_style: BackgroundStyle::default(),
             original_colon_blink: false,
         }
     }
@@ -113,6 +122,7 @@ impl SettingsDialog {
         animation_style: AnimationStyle,
         animation_speed: AnimationSpeed,
         colon_blink: bool,
+        background_style: BackgroundStyle,
     ) {
         self.visible = true;
         self.selected_field = SettingsField::default();
@@ -120,6 +130,7 @@ impl SettingsDialog {
         self.time_format = time_format;
         self.animation_style = animation_style;
         self.animation_speed = animation_speed;
+        self.background_style = background_style;
         self.colon_blink = colon_blink;
 
         // Find font index
@@ -135,6 +146,7 @@ impl SettingsDialog {
         self.original_time_format = time_format;
         self.original_animation_style = animation_style;
         self.original_animation_speed = animation_speed;
+        self.original_background_style = background_style;
         self.original_colon_blink = colon_blink;
     }
 
@@ -176,6 +188,11 @@ impl SettingsDialog {
         self.original_colon_blink
     }
 
+    /// Get original background style (for reverting on cancel).
+    pub fn original_background_style(&self) -> BackgroundStyle {
+        self.original_background_style
+    }
+
     /// Move to next field.
     pub fn next_field(&mut self) {
         self.selected_field = self.selected_field.next();
@@ -205,6 +222,9 @@ impl SettingsDialog {
             }
             SettingsField::Speed => {
                 self.animation_speed = self.animation_speed.next();
+            }
+            SettingsField::Background => {
+                self.background_style = self.background_style.next();
             }
             SettingsField::ColonBlink => {
                 self.colon_blink = !self.colon_blink;
@@ -236,6 +256,9 @@ impl SettingsDialog {
             SettingsField::Speed => {
                 self.animation_speed = self.animation_speed.prev();
             }
+            SettingsField::Background => {
+                self.background_style = self.background_style.prev();
+            }
             SettingsField::ColonBlink => {
                 self.colon_blink = !self.colon_blink;
             }
@@ -258,7 +281,7 @@ impl SettingsDialog {
 
         // Calculate centered dialog area
         let dialog_width = 40.min(area.width.saturating_sub(4));
-        let dialog_height = 17.min(area.height.saturating_sub(2));
+        let dialog_height = 19.min(area.height.saturating_sub(2));
 
         let dialog_x = area.x + (area.width.saturating_sub(dialog_width)) / 2;
         let dialog_y = area.y + (area.height.saturating_sub(dialog_height)) / 2;
@@ -280,20 +303,22 @@ impl SettingsDialog {
 
         // Layout for settings fields
         let chunks = Layout::vertical([
-            Constraint::Length(1), // Top padding
-            Constraint::Length(1), // Font
-            Constraint::Length(1), // Spacing
-            Constraint::Length(1), // Color
-            Constraint::Length(1), // Spacing
-            Constraint::Length(1), // Time Format
-            Constraint::Length(1), // Spacing
-            Constraint::Length(1), // Animation
-            Constraint::Length(1), // Spacing
-            Constraint::Length(1), // Speed
-            Constraint::Length(1), // Spacing
-            Constraint::Length(1), // Colon Blink
-            Constraint::Fill(1),   // Bottom space
-            Constraint::Length(1), // Help text
+            Constraint::Length(1), // 0: Top padding
+            Constraint::Length(1), // 1: Font
+            Constraint::Length(1), // 2: Spacing
+            Constraint::Length(1), // 3: Color
+            Constraint::Length(1), // 4: Spacing
+            Constraint::Length(1), // 5: Time Format
+            Constraint::Length(1), // 6: Spacing
+            Constraint::Length(1), // 7: Animation
+            Constraint::Length(1), // 8: Spacing
+            Constraint::Length(1), // 9: Speed
+            Constraint::Length(1), // 10: Spacing
+            Constraint::Length(1), // 11: Background
+            Constraint::Length(1), // 12: Spacing
+            Constraint::Length(1), // 13: Colon Blink
+            Constraint::Fill(1),   // 14: Bottom space
+            Constraint::Length(1), // 15: Help text
         ])
         .split(inner_area);
 
@@ -362,6 +387,18 @@ impl SettingsDialog {
             chunks[9],
         );
 
+        // Render background field
+        let background_line = self.render_field(
+            "Background",
+            self.background_style.display_name(),
+            self.selected_field == SettingsField::Background,
+            accent_color,
+        );
+        frame.render_widget(
+            Paragraph::new(background_line).alignment(Alignment::Center),
+            chunks[11],
+        );
+
         // Render colon blink field
         let blink_value = if self.colon_blink { "On" } else { "Off" };
         let blink_line = self.render_field(
@@ -372,7 +409,7 @@ impl SettingsDialog {
         );
         frame.render_widget(
             Paragraph::new(blink_line).alignment(Alignment::Center),
-            chunks[11],
+            chunks[13],
         );
 
         // Render help text
@@ -388,7 +425,7 @@ impl SettingsDialog {
         ]);
         frame.render_widget(
             Paragraph::new(help).alignment(Alignment::Center),
-            chunks[13],
+            chunks[15],
         );
     }
 

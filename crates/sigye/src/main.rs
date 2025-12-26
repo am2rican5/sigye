@@ -1,5 +1,6 @@
 //! sigye - A terminal clock application with configurable fonts.
 
+mod background;
 mod settings;
 
 use std::time::{Duration, Instant};
@@ -8,17 +9,18 @@ use chrono::Local;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::{Alignment, Constraint, Layout},
-    style::{Style, Stylize},
-    text::{Line, Span},
-    widgets::Paragraph,
+    layout::{Constraint, Layout, Position},
+    style::Stylize,
+    text::Line,
 };
 use sigye_config::Config;
 use sigye_core::{
-    AnimationSpeed, AnimationStyle, ColorTheme, TimeFormat, apply_animation, is_colon_visible,
+    AnimationSpeed, AnimationStyle, BackgroundStyle, ColorTheme, TimeFormat, apply_animation,
+    is_colon_visible,
 };
 use sigye_fonts::FontRegistry;
 
+use background::BackgroundState;
 use settings::SettingsDialog;
 
 fn main() -> color_eyre::Result<()> {
@@ -43,6 +45,8 @@ pub struct App {
     animation_speed: AnimationSpeed,
     /// Whether colon blinks.
     colon_blink: bool,
+    /// Current background style.
+    background_style: BackgroundStyle,
     /// Current font name.
     current_font: String,
     /// Font registry containing all available fonts.
@@ -63,6 +67,8 @@ pub struct App {
     flash_intensity: f32,
     /// When the last flash started (for decay calculation).
     flash_start: Option<Instant>,
+    /// Background animation state.
+    background_state: BackgroundState,
 }
 
 impl App {
@@ -97,6 +103,7 @@ impl App {
             animation_style: config.animation_style,
             animation_speed: config.animation_speed,
             colon_blink: config.colon_blink,
+            background_style: config.background_style,
             current_font: config.font_name.clone(),
             font_registry,
             settings_dialog,
@@ -107,6 +114,7 @@ impl App {
             last_hour: now.format("%H").to_string().parse().unwrap_or(0),
             flash_intensity: 0.0,
             flash_start: None,
+            background_state: BackgroundState::new(),
         }
     }
 
@@ -126,6 +134,14 @@ impl App {
 
         // Calculate animation elapsed time
         let elapsed_ms = self.animation_start.elapsed().as_millis() as u64;
+
+        // Render background first (behind everything else)
+        self.background_state.render(
+            frame,
+            self.background_style,
+            elapsed_ms,
+            self.animation_speed,
+        );
 
         // Update flash intensity for reactive animation
         self.update_flash(&now);
@@ -202,95 +218,106 @@ impl App {
             vec![]
         };
 
-        let time_text: Vec<Line> = if self.color_theme.is_dynamic()
-            || self.animation_style != AnimationStyle::None
-            || self.colon_blink
-        {
-            // Apply per-character coloring for dynamic themes or animations
-            time_lines
-                .into_iter()
-                .enumerate()
-                .map(|(y, line)| {
-                    let spans: Vec<Span> = line
-                        .chars()
-                        .enumerate()
-                        .map(|(x, ch)| {
-                            // Get base color
-                            let base_color = if self.color_theme.is_dynamic() {
-                                self.color_theme.color_at_position(x, y, width, height)
-                            } else {
-                                color
-                            };
+        // Render time directly to buffer, skipping spaces to preserve background
+        let chunk = chunks[1];
+        let text_width = width as u16;
+        let start_x = chunk.x + (chunk.width.saturating_sub(text_width)) / 2;
 
-                            // Apply animation
-                            let animated_color = apply_animation(
-                                base_color,
-                                self.animation_style,
-                                self.animation_speed,
-                                elapsed_ms,
-                                x,
-                                width,
-                                self.flash_intensity,
-                            );
+        let buf = frame.buffer_mut();
+        for (line_idx, line) in time_lines.iter().enumerate() {
+            let y_pos = chunk.y + line_idx as u16;
+            if y_pos >= chunk.y + chunk.height {
+                break;
+            }
 
-                            // Apply colon blink by hiding colon characters during "off" phase
-                            let is_colon = colon_positions.get(x).copied().unwrap_or(false);
-                            let should_hide =
-                                self.colon_blink && is_colon && !is_colon_visible(elapsed_ms);
+            for (char_idx, ch) in line.chars().enumerate() {
+                // Skip spaces to preserve background transparency
+                if ch == ' ' {
+                    continue;
+                }
 
-                            if should_hide {
-                                // Replace with space to hide colon (works on any terminal theme)
-                                Span::raw(" ")
-                            } else {
-                                Span::styled(ch.to_string(), Style::new().fg(animated_color))
-                            }
-                        })
-                        .collect();
-                    Line::from(spans)
-                })
-                .collect()
-        } else {
-            // Static color for the whole text (no animation, no colon blink)
-            time_lines
-                .into_iter()
-                .map(|s| Line::from(s).style(Style::new().fg(color)))
-                .collect()
-        };
+                let x_pos = start_x + char_idx as u16;
+                if x_pos >= chunk.x + chunk.width {
+                    continue;
+                }
 
-        let time_widget = Paragraph::new(time_text).alignment(Alignment::Center);
-        frame.render_widget(time_widget, chunks[1]);
+                // Apply colon blink by skipping colon characters during "off" phase
+                let is_colon = colon_positions.get(char_idx).copied().unwrap_or(false);
+                let should_hide = self.colon_blink && is_colon && !is_colon_visible(elapsed_ms);
+                if should_hide {
+                    continue;
+                }
 
-        // Render date (also with dynamic colors/animations if applicable)
-        let date_widget =
-            if self.color_theme.is_dynamic() || self.animation_style != AnimationStyle::None {
-                let date_spans: Vec<Span> = date_str
-                    .chars()
-                    .enumerate()
-                    .map(|(x, ch)| {
-                        let base_color = if self.color_theme.is_dynamic() {
-                            self.color_theme.color_at_position(x, 0, date_str.len(), 1)
-                        } else {
-                            color
-                        };
-                        let animated_color = apply_animation(
-                            base_color,
-                            self.animation_style,
-                            self.animation_speed,
-                            elapsed_ms,
-                            x,
-                            date_str.len(),
-                            self.flash_intensity,
-                        );
-                        Span::styled(ch.to_string(), Style::new().fg(animated_color))
-                    })
-                    .collect();
-                Paragraph::new(Line::from(date_spans)).alignment(Alignment::Center)
+                // Get base color
+                let base_color = if self.color_theme.is_dynamic() {
+                    self.color_theme
+                        .color_at_position(char_idx, line_idx, width, height)
+                } else {
+                    color
+                };
+
+                // Apply animation
+                let animated_color = apply_animation(
+                    base_color,
+                    self.animation_style,
+                    self.animation_speed,
+                    elapsed_ms,
+                    char_idx,
+                    width,
+                    self.flash_intensity,
+                );
+
+                // Write directly to buffer
+                if let Some(cell) = buf.cell_mut(Position::new(x_pos, y_pos)) {
+                    cell.set_char(ch);
+                    cell.set_fg(animated_color);
+                }
+            }
+        }
+
+        // Render date directly to buffer, skipping spaces to preserve background
+        let date_chunk = chunks[3];
+        let date_width = date_str.len() as u16;
+        let date_start_x = date_chunk.x + (date_chunk.width.saturating_sub(date_width)) / 2;
+        let date_y = date_chunk.y;
+
+        let buf = frame.buffer_mut();
+        for (char_idx, ch) in date_str.chars().enumerate() {
+            // Skip spaces to preserve background transparency
+            if ch == ' ' {
+                continue;
+            }
+
+            let x_pos = date_start_x + char_idx as u16;
+            if x_pos >= date_chunk.x + date_chunk.width {
+                continue;
+            }
+
+            // Get base color
+            let base_color = if self.color_theme.is_dynamic() {
+                self.color_theme
+                    .color_at_position(char_idx, 0, date_str.len(), 1)
             } else {
-                Paragraph::new(date_str)
-                    .style(Style::new().fg(color))
-                    .alignment(Alignment::Center)
+                color
             };
-        frame.render_widget(date_widget, chunks[3]);
+
+            // Apply animation
+            let animated_color = apply_animation(
+                base_color,
+                self.animation_style,
+                self.animation_speed,
+                elapsed_ms,
+                char_idx,
+                date_str.len(),
+                self.flash_intensity,
+            );
+
+            // Write directly to buffer
+            if let Some(cell) = buf.cell_mut(Position::new(x_pos, date_y)) {
+                cell.set_char(ch);
+                cell.set_fg(animated_color);
+            }
+        }
 
         // Render help text
         let help = Line::from(vec![
@@ -302,6 +329,8 @@ impl App {
             " color  ".dark_gray(),
             "a".bold().fg(color),
             " anim  ".dark_gray(),
+            "b".bold().fg(color),
+            " bg  ".dark_gray(),
             "s".bold().fg(color),
             " settings".dark_gray(),
         ])
@@ -380,6 +409,7 @@ impl App {
             (_, KeyCode::Char('t')) => self.toggle_time_format(),
             (_, KeyCode::Char('c')) => self.cycle_color_theme(),
             (_, KeyCode::Char('a')) => self.cycle_animation(),
+            (_, KeyCode::Char('b')) => self.cycle_background(),
             (_, KeyCode::Char('s')) => self.open_settings(),
             _ => {}
         }
@@ -420,6 +450,7 @@ impl App {
         self.animation_style = self.settings_dialog.animation_style;
         self.animation_speed = self.settings_dialog.animation_speed;
         self.colon_blink = self.settings_dialog.colon_blink;
+        self.background_style = self.settings_dialog.background_style;
     }
 
     /// Open settings dialog with current settings.
@@ -431,6 +462,7 @@ impl App {
             self.animation_style,
             self.animation_speed,
             self.colon_blink,
+            self.background_style,
         );
     }
 
@@ -443,6 +475,7 @@ impl App {
         self.config.animation_style = self.animation_style;
         self.config.animation_speed = self.animation_speed;
         self.config.colon_blink = self.colon_blink;
+        self.config.background_style = self.background_style;
 
         if let Err(e) = self.config.save() {
             eprintln!("Warning: Failed to save config: {e}");
@@ -460,6 +493,7 @@ impl App {
         self.animation_style = self.settings_dialog.original_animation_style();
         self.animation_speed = self.settings_dialog.original_animation_speed();
         self.colon_blink = self.settings_dialog.original_colon_blink();
+        self.background_style = self.settings_dialog.original_background_style();
 
         self.settings_dialog.close();
     }
@@ -477,6 +511,11 @@ impl App {
     /// Cycle through animation styles.
     fn cycle_animation(&mut self) {
         self.animation_style = self.animation_style.next();
+    }
+
+    /// Cycle through background styles.
+    fn cycle_background(&mut self) {
+        self.background_style = self.background_style.next();
     }
 
     /// Set running to false to quit the application.

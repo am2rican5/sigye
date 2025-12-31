@@ -37,6 +37,10 @@ pub struct Config {
     /// Background animation style.
     #[serde(default)]
     pub background_style: BackgroundStyle,
+
+    /// Weather location for dynamic weather background (empty = auto-detect via IP).
+    #[serde(default)]
+    pub weather_location: String,
 }
 
 fn default_font() -> String {
@@ -53,6 +57,7 @@ impl Default for Config {
             animation_speed: AnimationSpeed::default(),
             colon_blink: false,
             background_style: BackgroundStyle::default(),
+            weather_location: String::new(),
         }
     }
 }

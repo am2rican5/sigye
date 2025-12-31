@@ -2,6 +2,7 @@
 
 mod settings;
 mod system_metrics;
+mod weather;
 
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,7 @@ use sigye_fonts::FontRegistry;
 use settings::SettingsDialog;
 use sigye_background::BackgroundState;
 use system_metrics::SystemMonitor;
+use weather::WeatherMonitor;
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -72,6 +74,8 @@ pub struct App {
     background_state: BackgroundState,
     /// System monitor for reactive backgrounds (lazy initialized).
     system_monitor: Option<SystemMonitor>,
+    /// Weather monitor for dynamic weather background (lazy initialized).
+    weather_monitor: Option<WeatherMonitor>,
 }
 
 impl App {
@@ -108,6 +112,15 @@ impl App {
             None
         };
 
+        // Initialize weather monitor if weather background is selected
+        let weather_monitor = if config.background_style.requires_weather() {
+            let monitor = WeatherMonitor::new(config.weather_location.clone());
+            monitor.start();
+            Some(monitor)
+        } else {
+            None
+        };
+
         Self {
             running: false,
             time_format: config.time_format,
@@ -128,6 +141,7 @@ impl App {
             flash_start: None,
             background_state: BackgroundState::new(),
             system_monitor,
+            weather_monitor,
         }
     }
 
@@ -151,10 +165,20 @@ impl App {
         // Get metrics for reactive backgrounds
         let metrics = self.system_monitor.as_ref().map(|m| m.get_metrics());
 
+        // Resolve weather background to actual style
+        let effective_background = if self.background_style == BackgroundStyle::Weather {
+            self.weather_monitor
+                .as_ref()
+                .map(|m| m.get_background())
+                .unwrap_or(BackgroundStyle::Starfield)
+        } else {
+            self.background_style
+        };
+
         // Render background first (behind everything else)
         self.background_state.render(
             frame,
-            self.background_style,
+            effective_background,
             elapsed_ms,
             self.animation_speed,
             metrics.as_ref(),
@@ -468,7 +492,7 @@ impl App {
         self.animation_speed = self.settings_dialog.animation_speed;
         self.colon_blink = self.settings_dialog.colon_blink;
         self.background_style = self.settings_dialog.background_style;
-        self.update_system_monitor();
+        self.update_background_monitors();
     }
 
     /// Open settings dialog with current settings.
@@ -512,7 +536,7 @@ impl App {
         self.animation_speed = self.settings_dialog.original_animation_speed();
         self.colon_blink = self.settings_dialog.original_colon_blink();
         self.background_style = self.settings_dialog.original_background_style();
-        self.update_system_monitor();
+        self.update_background_monitors();
 
         self.settings_dialog.close();
     }
@@ -535,19 +559,27 @@ impl App {
     /// Cycle through background styles.
     fn cycle_background(&mut self) {
         self.background_style = self.background_style.next();
-        self.update_system_monitor();
+        self.update_background_monitors();
     }
 
-    /// Start or stop system monitor based on current background style.
-    fn update_system_monitor(&mut self) {
+    /// Start or stop background monitors based on current background style.
+    fn update_background_monitors(&mut self) {
+        // System monitor for reactive backgrounds
         if self.background_style.is_reactive() && self.system_monitor.is_none() {
-            // Start monitor for reactive backgrounds
             let monitor = SystemMonitor::new();
             monitor.start();
             self.system_monitor = Some(monitor);
         } else if !self.background_style.is_reactive() && self.system_monitor.is_some() {
-            // Stop monitor when not using reactive backgrounds
             self.system_monitor = None;
+        }
+
+        // Weather monitor for weather background
+        if self.background_style.requires_weather() && self.weather_monitor.is_none() {
+            let monitor = WeatherMonitor::new(self.config.weather_location.clone());
+            monitor.start();
+            self.weather_monitor = Some(monitor);
+        } else if !self.background_style.requires_weather() && self.weather_monitor.is_some() {
+            self.weather_monitor = None;
         }
     }
 

@@ -230,3 +230,141 @@ pub fn render_aurora_char(
 
     Span::styled(ch.to_string(), Style::new().fg(Color::Rgb(r, g, b)))
 }
+
+/// Render a twilight dawn background character (golden hour - sunrise).
+pub fn render_twilight_dawn_char(
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    elapsed_ms: u64,
+    speed: AnimationSpeed,
+) -> Span<'static> {
+    let y_norm = y as f32 / height.max(1) as f32;
+    let x_norm = x as f32 / width.max(1) as f32;
+
+    // Gradient from dark blue (top) to orange/pink (horizon at bottom)
+    let (r, g, b) = if y_norm < 0.3 {
+        // Upper sky - deep blue transitioning to lighter
+        let t = y_norm / 0.3;
+        (
+            (15.0 + 40.0 * t) as u8,
+            (20.0 + 50.0 * t) as u8,
+            (60.0 + 60.0 * t) as u8,
+        )
+    } else if y_norm < 0.6 {
+        // Middle sky - blue to pink/orange transition
+        let t = (y_norm - 0.3) / 0.3;
+        (
+            (55.0 + 150.0 * t) as u8,
+            (70.0 + 60.0 * t) as u8,
+            (120.0 - 40.0 * t) as u8,
+        )
+    } else {
+        // Horizon - golden orange to warm yellow
+        let t = (y_norm - 0.6) / 0.4;
+        (
+            (205.0 + 50.0 * t).min(255.0) as u8,
+            (130.0 + 70.0 * t) as u8,
+            (80.0 + 40.0 * t) as u8,
+        )
+    };
+
+    // Subtle shimmer effect
+    let shimmer_period = speed.aurora_wave_period_ms();
+    let shimmer =
+        ((elapsed_ms % shimmer_period) as f32 / shimmer_period as f32 * 2.0 * std::f32::consts::PI)
+            .sin()
+            * 0.05
+            + 0.95;
+
+    // Sparse clouds/wisps pattern
+    let seed = (x as usize)
+        .wrapping_mul(31)
+        .wrapping_add((y as usize).wrapping_mul(17));
+    let cloud_wave = ((x_norm * 4.0 + elapsed_ms as f32 / 15000.0) * std::f32::consts::PI).sin();
+    let cloud_threshold = 3 + (cloud_wave * 2.0).abs() as usize;
+
+    let ch = if seed % 100 < cloud_threshold && y_norm > 0.2 && y_norm < 0.7 {
+        '░'
+    } else if seed % 200 < 2 && y_norm < 0.4 {
+        '·'
+    } else {
+        return Span::raw(" ");
+    };
+
+    let r = (r as f32 * shimmer) as u8;
+    let g = (g as f32 * shimmer) as u8;
+    let b = (b as f32 * shimmer) as u8;
+
+    Span::styled(ch.to_string(), Style::new().fg(Color::Rgb(r, g, b)))
+}
+
+/// Render a twilight dusk background character (sunset).
+pub fn render_twilight_dusk_char(
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    elapsed_ms: u64,
+    speed: AnimationSpeed,
+) -> Span<'static> {
+    let y_norm = y as f32 / height.max(1) as f32;
+    let x_norm = x as f32 / width.max(1) as f32;
+
+    // Dusk: deeper purple at top, rich orange/red at horizon
+    let (r, g, b) = if y_norm < 0.3 {
+        // Upper sky - deep purple/blue
+        let t = y_norm / 0.3;
+        (
+            (20.0 + 40.0 * t) as u8,
+            (10.0 + 20.0 * t) as u8,
+            (50.0 + 50.0 * t) as u8,
+        )
+    } else if y_norm < 0.6 {
+        // Middle sky - purple to deep orange
+        let t = (y_norm - 0.3) / 0.3;
+        (
+            (60.0 + 140.0 * t) as u8,
+            (30.0 + 40.0 * t) as u8,
+            (100.0 - 60.0 * t) as u8,
+        )
+    } else {
+        // Horizon - deep orange to red
+        let t = (y_norm - 0.6) / 0.4;
+        (
+            (200.0 + 55.0 * t).min(255.0) as u8,
+            (70.0 + 50.0 * t) as u8,
+            (40.0 + 20.0 * t) as u8,
+        )
+    };
+
+    // Subtle shimmer effect
+    let shimmer_period = speed.aurora_wave_period_ms();
+    let shimmer =
+        ((elapsed_ms % shimmer_period) as f32 / shimmer_period as f32 * 2.0 * std::f32::consts::PI)
+            .sin()
+            * 0.05
+            + 0.95;
+
+    // Sparse clouds/wisps pattern - slightly different from dawn
+    let seed = (x as usize)
+        .wrapping_mul(37)
+        .wrapping_add((y as usize).wrapping_mul(19));
+    let cloud_wave = ((x_norm * 3.0 - elapsed_ms as f32 / 12000.0) * std::f32::consts::PI).sin();
+    let cloud_threshold = 4 + (cloud_wave * 2.5).abs() as usize;
+
+    let ch = if seed % 100 < cloud_threshold && y_norm > 0.15 && y_norm < 0.65 {
+        '░'
+    } else if seed % 180 < 2 && y_norm < 0.35 {
+        '·'
+    } else {
+        return Span::raw(" ");
+    };
+
+    let r = (r as f32 * shimmer) as u8;
+    let g = (g as f32 * shimmer) as u8;
+    let b = (b as f32 * shimmer) as u8;
+
+    Span::styled(ch.to_string(), Style::new().fg(Color::Rgb(r, g, b)))
+}

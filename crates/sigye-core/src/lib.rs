@@ -26,6 +26,18 @@ pub struct SystemMetrics {
     pub battery_charging: Option<bool>,
 }
 
+/// Time of day for weather-aware rendering.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TimeOfDay {
+    #[default]
+    Day,
+    Night,
+    /// Civil twilight before sunrise (~30 min).
+    Dawn,
+    /// Civil twilight after sunset (~30 min).
+    Dusk,
+}
+
 /// Time format for the clock display.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeFormat {
@@ -120,6 +132,11 @@ pub enum BackgroundStyle {
     Windy,
     Cloudy,
     Foggy,
+    // Dynamic weather background based on real weather data
+    Weather,
+    // Twilight backgrounds for dawn/dusk
+    TwilightDawn,
+    TwilightDusk,
     // Reactive backgrounds that respond to system resource usage
     SystemPulse,
     ResourceWave,
@@ -142,6 +159,9 @@ const ALL_BACKGROUND_STYLES: &[BackgroundStyle] = &[
     BackgroundStyle::Windy,
     BackgroundStyle::Cloudy,
     BackgroundStyle::Foggy,
+    BackgroundStyle::Weather,
+    BackgroundStyle::TwilightDawn,
+    BackgroundStyle::TwilightDusk,
     BackgroundStyle::SystemPulse,
     BackgroundStyle::ResourceWave,
     BackgroundStyle::DataFlow,
@@ -189,6 +209,9 @@ impl BackgroundStyle {
             BackgroundStyle::Windy => "Windy",
             BackgroundStyle::Cloudy => "Cloudy",
             BackgroundStyle::Foggy => "Foggy",
+            BackgroundStyle::Weather => "Weather",
+            BackgroundStyle::TwilightDawn => "Dawn",
+            BackgroundStyle::TwilightDusk => "Dusk",
             BackgroundStyle::SystemPulse => "Sys Pulse",
             BackgroundStyle::ResourceWave => "Resource",
             BackgroundStyle::DataFlow => "Data Flow",
@@ -205,6 +228,11 @@ impl BackgroundStyle {
                 | BackgroundStyle::DataFlow
                 | BackgroundStyle::HeatMap
         )
+    }
+
+    /// Check if this background style requires weather data.
+    pub fn requires_weather(self) -> bool {
+        matches!(self, BackgroundStyle::Weather)
     }
 }
 

@@ -20,6 +20,8 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.9"
 directories = "6.0"
 sysinfo = "0.37"
+ureq = { version = "3.1", features = ["json"] }
+serde_json = "1.0"
 sigye-core = { version = "0.2.1", path = "crates/sigye-core" }
 sigye-fonts = { version = "0.2.1", path = "crates/sigye-fonts" }
 sigye-config = { version = "0.2.1", path = "crates/sigye-config" }

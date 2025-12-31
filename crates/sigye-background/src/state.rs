@@ -200,6 +200,16 @@ impl BackgroundState {
             BackgroundStyle::Foggy => {
                 weather::render_foggy_char(x, y, width, height, elapsed_ms, speed)
             }
+            // Weather style should be resolved by main app before rendering.
+            // If it reaches here, fallback to Starfield.
+            BackgroundStyle::Weather => stateless::render_starfield_char(x, y, elapsed_ms, speed),
+            // Twilight backgrounds
+            BackgroundStyle::TwilightDawn => {
+                stateless::render_twilight_dawn_char(x, y, width, height, elapsed_ms, speed)
+            }
+            BackgroundStyle::TwilightDusk => {
+                stateless::render_twilight_dusk_char(x, y, width, height, elapsed_ms, speed)
+            }
             // Reactive backgrounds are handled separately in render_reactive()
             BackgroundStyle::SystemPulse
             | BackgroundStyle::ResourceWave

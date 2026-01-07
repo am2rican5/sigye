@@ -241,7 +241,7 @@ pub fn update_storm(
     } else if time_since_flash > state.next_lightning_interval {
         // Trigger new lightning
         state.last_lightning_ms = elapsed_ms;
-        state.lightning_duration_ms = 100 + (state.lightning_seed % 150); // 100-250ms
+        state.lightning_duration_ms = 100 + (state.lightning_seed % 151); // 100-250ms
         state.flash_intensity = 1.0;
     }
 }

@@ -41,10 +41,18 @@ pub struct Config {
     /// Weather location for dynamic weather background (empty = auto-detect via IP).
     #[serde(default)]
     pub weather_location: String,
+
+    /// Whether to show seconds in the clock display.
+    #[serde(default = "default_show_seconds")]
+    pub show_seconds: bool,
 }
 
 fn default_font() -> String {
     "Standard".to_string()
+}
+
+fn default_show_seconds() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -58,6 +66,7 @@ impl Default for Config {
             colon_blink: false,
             background_style: BackgroundStyle::default(),
             weather_location: String::new(),
+            show_seconds: default_show_seconds(),
         }
     }
 }

@@ -48,6 +48,8 @@ pub struct App {
     animation_speed: AnimationSpeed,
     /// Whether colon blinks.
     colon_blink: bool,
+    /// Whether to show seconds in the clock display.
+    show_seconds: bool,
     /// Current background style.
     background_style: BackgroundStyle,
     /// Current font name.
@@ -128,6 +130,7 @@ impl App {
             animation_style: config.animation_style,
             animation_speed: config.animation_speed,
             colon_blink: config.colon_blink,
+            show_seconds: config.show_seconds,
             background_style: config.background_style,
             current_font: config.font_name.clone(),
             font_registry,
@@ -208,13 +211,20 @@ impl App {
         let area = frame.area();
 
         // Build time string
-        let time_str = match self.time_format {
-            TimeFormat::TwentyFourHour => {
+        let time_str = match (self.time_format, self.show_seconds) {
+            (TimeFormat::TwentyFourHour, true) => {
                 format!("{hours:02}:{minutes:02}:{seconds:02}")
             }
-            TimeFormat::TwelveHour => {
+            (TimeFormat::TwentyFourHour, false) => {
+                format!("{hours:02}:{minutes:02}")
+            }
+            (TimeFormat::TwelveHour, true) => {
                 let ampm = if is_pm { "PM" } else { "AM" };
                 format!("{hours:2}:{minutes:02}:{seconds:02} {ampm}")
+            }
+            (TimeFormat::TwelveHour, false) => {
+                let ampm = if is_pm { "PM" } else { "AM" };
+                format!("{hours:2}:{minutes:02} {ampm}")
             }
         };
 
@@ -491,6 +501,7 @@ impl App {
         self.animation_style = self.settings_dialog.animation_style;
         self.animation_speed = self.settings_dialog.animation_speed;
         self.colon_blink = self.settings_dialog.colon_blink;
+        self.show_seconds = self.settings_dialog.show_seconds;
         self.background_style = self.settings_dialog.background_style;
         self.update_background_monitors();
     }
@@ -504,6 +515,7 @@ impl App {
             self.animation_style,
             self.animation_speed,
             self.colon_blink,
+            self.show_seconds,
             self.background_style,
         );
     }
@@ -517,6 +529,7 @@ impl App {
         self.config.animation_style = self.animation_style;
         self.config.animation_speed = self.animation_speed;
         self.config.colon_blink = self.colon_blink;
+        self.config.show_seconds = self.show_seconds;
         self.config.background_style = self.background_style;
 
         if let Err(e) = self.config.save() {
@@ -535,6 +548,7 @@ impl App {
         self.animation_style = self.settings_dialog.original_animation_style();
         self.animation_speed = self.settings_dialog.original_animation_speed();
         self.colon_blink = self.settings_dialog.original_colon_blink();
+        self.show_seconds = self.settings_dialog.original_show_seconds();
         self.background_style = self.settings_dialog.original_background_style();
         self.update_background_monitors();
 

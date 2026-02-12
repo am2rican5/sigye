@@ -17,7 +17,7 @@ crossterm = "0.29"
 chrono = "0.4"
 color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.9"
+toml = "1.0"
 directories = "6.0"
 sysinfo = "0.38"
 ureq = { version = "3.2", features = ["json"] }

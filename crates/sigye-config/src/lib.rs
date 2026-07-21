@@ -298,8 +298,10 @@ mod tests {
 
     #[test]
     fn minimal_mode_round_trips() {
-        let mut config = Config::default();
-        config.minimal_mode = true;
+        let config = Config {
+            minimal_mode: true,
+            ..Config::default()
+        };
 
         let encoded = toml::to_string(&config).unwrap();
         let decoded: Config = toml::from_str(&encoded).unwrap();

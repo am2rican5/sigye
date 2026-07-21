@@ -219,23 +219,28 @@ impl Mode for ClockMode {
         let font = ctx.font_registry.get_or_default(&ctx.current_font);
         let font_height = font.height as u16;
 
-        let has_sun_info = ctx.sunrise_sunset.is_some();
-
-        // Layout: Fill(1), font height, Length(2) gap, Length(1) date, [sun], [format_info],
-        //         Fill(1), Length(1) toast/progress, Length(1) hints
-        let sun_height = if has_sun_info { 1 } else { 0 };
-        let chunks = Layout::vertical([
-            Constraint::Fill(1),             // [0] top padding
-            Constraint::Length(font_height), // [1] big ASCII time
-            Constraint::Length(2),           // [2] gap
-            Constraint::Length(1),           // [3] date
-            Constraint::Length(sun_height),  // [4] sunrise/sunset
-            Constraint::Length(1),           // [5] format info
-            Constraint::Fill(1),             // [6] bottom padding
-            Constraint::Length(1),           // [7] progress bars
-            Constraint::Length(1),           // [8] hints
-        ])
-        .split(area);
+        let chunks = if ctx.config.minimal_mode {
+            Layout::vertical([
+                Constraint::Fill(1),
+                Constraint::Length(font_height),
+                Constraint::Fill(1),
+            ])
+            .split(area)
+        } else {
+            let sun_height = if ctx.sunrise_sunset.is_some() { 1 } else { 0 };
+            Layout::vertical([
+                Constraint::Fill(1),
+                Constraint::Length(font_height),
+                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Length(sun_height),
+                Constraint::Length(1),
+                Constraint::Fill(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(area)
+        };
 
         let now = Local::now();
 
@@ -289,6 +294,10 @@ impl Mode for ClockMode {
 
         // Render big ASCII time
         render::render_ascii_text(frame, chunks[1], font, &big_text, &params);
+
+        if ctx.config.minimal_mode {
+            return;
+        }
 
         // Render date string
         let date_str = now.format("%A, %B %-d, %Y").to_string();
@@ -382,6 +391,13 @@ impl Mode for ClockMode {
 
     fn handle_key(&mut self, key: KeyEvent, ctx: &mut RenderContext) -> bool {
         match key.code {
+            KeyCode::Char('z') => {
+                ctx.config.minimal_mode = !ctx.config.minimal_mode;
+                if let Err(e) = ctx.config.save() {
+                    eprintln!("Warning: Failed to save config: {e}");
+                }
+                true
+            }
             KeyCode::Char('f') => {
                 self.display_format = self.display_format.next();
                 true
@@ -410,6 +426,7 @@ impl Mode for ClockMode {
 
     fn key_hints(&self) -> Vec<(&'static str, &'static str)> {
         vec![
+            ("z", "minimal"),
             ("f", "format"),
             ("u", "copy unix"),
             ("i", "copy iso"),
@@ -480,6 +497,31 @@ mod tests {
         assert!(!buffer_contains_text(terminal.backend(), "[s] settings"));
     }
 
+    #[test]
+    fn render_minimal_view_shows_only_centered_clock() {
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mode = ClockMode::new();
+        let mut ctx = render_context(false);
+        ctx.config.minimal_mode = true;
+        ctx.sunrise_sunset = Some(("06:00".into(), "18:00".into()));
+        let date = Local::now().format("%A, %B %-d, %Y").to_string();
+
+        terminal.draw(|frame| mode.render(frame, &ctx)).unwrap();
+
+        let backend = terminal.backend();
+        assert!(!buffer_contains_text(backend, &date));
+        assert!(!buffer_contains_text(backend, "Sunrise"));
+        assert!(!buffer_contains_text(backend, "Day"));
+        assert!(!buffer_contains_text(backend, "Year"));
+        assert!(!buffer_contains_text(backend, "[s] settings"));
+
+        let rows = occupied_rows(backend);
+        assert!(!rows.is_empty());
+        let top_padding = rows[0];
+        let bottom_padding = 39 - rows[rows.len() - 1];
+        assert!(top_padding.abs_diff(bottom_padding) <= 1);
+    }
+
     fn buffer_contains_text(backend: &TestBackend, text: &str) -> bool {
         let buffer = backend.buffer();
         let area = buffer.area;
@@ -491,6 +533,17 @@ mod tests {
             }
         }
         false
+    }
+
+    fn occupied_rows(backend: &TestBackend) -> Vec<u16> {
+        let buffer = backend.buffer();
+        let area = buffer.area;
+        (area.top()..area.bottom())
+            .filter(|&y| {
+                (area.left()..area.right())
+                    .any(|x| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
+            })
+            .collect()
     }
 
     fn text_matches_at(backend: &TestBackend, x: u16, y: u16, text: &str) -> bool {

@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
@@ -7,27 +7,42 @@ version = "0.5.0"
 authors = ["am2rican5 <am2rican5@gmail.com>"]
 license = "MIT"
 edition = "2024"
+rust-version = "1.97.1"
 repository = "https://github.com/am2rican5/sigye"
 homepage = "https://github.com/am2rican5/sigye"
 readme = "README.md"
 
 [workspace.dependencies]
-ratatui = { version = "0.30.0", default-features = false, features = ["crossterm"] }
+ratatui = { version = "0.30", default-features = false, features = [
+  "crossterm",
+] }
 crossterm = "0.29"
 chrono = "0.4"
 color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
-toml = "1.0"
+toml = "1.1"
 directories = "6.0"
-sysinfo = { version = "0.38", default-features = false, features = ["network", "system"] }
+sysinfo = { version = "0.39", default-features = false, features = [
+  "network",
+  "system",
+] }
 ureq = { version = "3.3", features = ["json"] }
-notify-rust = "4"
+notify-rust = "4.18"
 chrono-tz = "0.10"
-arboard = { version = "3", default-features = false }
-sigye-core = { version = "0.5.0", path = "crates/sigye-core" }
-sigye-fonts = { version = "0.5.0", path = "crates/sigye-fonts" }
-sigye-config = { version = "0.5.0", path = "crates/sigye-config" }
-sigye-background = { version = "0.5.0", path = "crates/sigye-background" }
+arboard = { version = "3.6", default-features = false }
+clap = { version = "4.6", features = ["derive"] }
+sigye-core = { version = "0.5", path = "crates/sigye-core" }
+sigye-fonts = { version = "0.5", path = "crates/sigye-fonts" }
+sigye-config = { version = "0.5", path = "crates/sigye-config" }
+sigye-background = { version = "0.5", path = "crates/sigye-background" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+# latest convention
+mod_module_files = "deny"
 
 [profile.release]
 codegen-units = 1

@@ -5,9 +5,10 @@ version.workspace = true
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme = "../../README.md"
+readme.workspace = true
 keywords = ["cli", "clock", "terminal", "tui", "figlet"]
 categories = ["command-line-utilities"]
 
@@ -23,7 +24,10 @@ color-eyre.workspace = true
 sysinfo.workspace = true
 ureq.workspace = true
 serde.workspace = true
-clap = { version = "4", features = ["derive"] }
+clap.workspace = true
 notify-rust.workspace = true
 chrono-tz.workspace = true
 arboard.workspace = true
+
+[lints]
+workspace = true

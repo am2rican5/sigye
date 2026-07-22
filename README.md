@@ -342,6 +342,20 @@ cargo fmt -- --check
 cargo clippy
 ```
 
+### Workspace conventions
+
+- **MSRV is 1.97.1**, declared in `[workspace.package]` and inherited by every crate.
+- **All dependencies live in `[workspace.dependencies]`** in the root `Cargo.toml`, and
+  crates pull them in with `foo.workspace = true`. Version requirements are written as
+  `major.minor`.
+- **No `unsafe`.** The workspace sets `unsafe_code = "forbid"`, so `unsafe` is a compile
+  error in `crates/` and cannot be re-enabled by a local `#[allow]`.
+- **No `mod.rs`.** Modules use the self-named layout (`modes.rs` alongside `modes/`).
+  This is now enforced by `clippy::mod_module_files`.
+- **Releases bump versions in the root `Cargo.toml` only.** Both `[workspace.package]
+  version` and the four internal `sigye-* = { version = ... }` entries have to move
+  together.
+
 ## License
 
 Copyright (c) am2rican5

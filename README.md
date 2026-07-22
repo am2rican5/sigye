@@ -14,6 +14,7 @@ A feature-rich terminal clock with ASCII art fonts, animated backgrounds, and pr
 - **Developer clock formats** — Unix timestamp, ISO 8601, and hex time display (cycle with `f`)
 - **Clipboard hotkeys** — Copy unix timestamp (`u`) or ISO 8601 (`i`) to clipboard instantly
 - **Day & year progress bars** — Ambient progress indicators at a glance
+- **Minimal clock view** — Press `z` to hide all secondary UI and center the clock; the preference is saved
 - **Scriptable output** — `sigye --once --format unix` for shell pipelines
 - **40+ bundled FIGlet fonts** — From classic Standard to stylish Star Wars
 - **18 color themes** — 7 static colors and 11 gradient palettes
@@ -151,6 +152,7 @@ sigye --mode pomodoro --font Doom --theme fire
 | `f` | Cycle display format (Clock → Unix Timestamp → ISO 8601 → Hex Time) |
 | `u` | Copy unix timestamp to clipboard |
 | `i` | Copy ISO 8601 timestamp to clipboard |
+| `z` | Toggle saved minimal clock view |
 
 ### Pomodoro Mode
 
@@ -208,6 +210,7 @@ animation_style = "None"
 animation_speed = "Medium"
 colon_blink = false
 show_seconds = true
+minimal_mode = false
 background_style = "None"
 weather_location = ""          # Empty for auto-detect, or city name (e.g., "Seoul")
 pomodoro_work_mins = 25

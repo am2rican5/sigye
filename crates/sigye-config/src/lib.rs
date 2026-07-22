@@ -46,6 +46,10 @@ pub struct Config {
     #[serde(default = "default_show_seconds")]
     pub show_seconds: bool,
 
+    /// Whether Clock mode hides all secondary UI chrome.
+    #[serde(default)]
+    pub minimal_mode: bool,
+
     /// Pomodoro work duration in minutes.
     #[serde(default = "default_pomodoro_work_mins")]
     pub pomodoro_work_mins: u32,
@@ -180,6 +184,7 @@ impl Default for Config {
             background_style: BackgroundStyle::default(),
             weather_location: String::new(),
             show_seconds: default_show_seconds(),
+            minimal_mode: false,
             pomodoro_work_mins: default_pomodoro_work_mins(),
             pomodoro_break_mins: default_pomodoro_break_mins(),
             pomodoro_long_break_mins: default_pomodoro_long_break_mins(),
@@ -279,3 +284,28 @@ impl std::fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_minimal_mode_defaults_to_false() {
+        let config: Config = toml::from_str("").unwrap();
+
+        assert!(!config.minimal_mode);
+    }
+
+    #[test]
+    fn minimal_mode_round_trips() {
+        let config = Config {
+            minimal_mode: true,
+            ..Config::default()
+        };
+
+        let encoded = toml::to_string(&config).unwrap();
+        let decoded: Config = toml::from_str(&encoded).unwrap();
+
+        assert!(decoded.minimal_mode);
+    }
+}

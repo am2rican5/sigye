@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 authors = ["am2rican5 <am2rican5@gmail.com>"]
 license = "MIT"
 edition = "2024"
@@ -31,10 +31,10 @@ notify-rust = "4.18"
 chrono-tz = "0.10"
 arboard = { version = "3.6", default-features = false }
 clap = { version = "4.6", features = ["derive"] }
-sigye-core = { version = "0.5", path = "crates/sigye-core" }
-sigye-fonts = { version = "0.5", path = "crates/sigye-fonts" }
-sigye-config = { version = "0.5", path = "crates/sigye-config" }
-sigye-background = { version = "0.5", path = "crates/sigye-background" }
+sigye-core = { version = "0.6", path = "crates/sigye-core" }
+sigye-fonts = { version = "0.6", path = "crates/sigye-fonts" }
+sigye-config = { version = "0.6", path = "crates/sigye-config" }
+sigye-background = { version = "0.6", path = "crates/sigye-background" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

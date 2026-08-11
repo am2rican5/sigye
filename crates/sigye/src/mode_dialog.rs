@@ -138,7 +138,7 @@ impl ModeDialog {
             MouseEventKind::ScrollDown => {
                 self.selected = (self.selected + 1).min(MODES.len() - 1);
             }
-            MouseEventKind::Down(MouseButton::Left) => {
+            MouseEventKind::Up(MouseButton::Left) => {
                 if layout.list_area.contains((mouse.column, mouse.row).into()) {
                     let index = (mouse.row - layout.list_area.y) as usize;
                     if let Some(&mode) = MODES.get(index) {
@@ -242,7 +242,7 @@ mod tests {
 
     fn click(column: u16, row: u16) -> MouseEvent {
         MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
+            kind: MouseEventKind::Up(MouseButton::Left),
             column,
             row,
             modifiers: KeyModifiers::NONE,

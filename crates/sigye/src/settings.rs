@@ -385,7 +385,7 @@ impl SettingsDialog {
         match mouse.kind {
             MouseEventKind::ScrollUp => self.move_selection_clamped(-1),
             MouseEventKind::ScrollDown => self.move_selection_clamped(1),
-            MouseEventKind::Down(MouseButton::Left) => {
+            MouseEventKind::Up(MouseButton::Left) => {
                 if let Some(key) = footer_action_at(
                     &settings_footer_buttons(areas.help_area),
                     mouse.column,
@@ -832,7 +832,7 @@ mod tests {
 
     fn click(column: u16, row: u16) -> MouseEvent {
         MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
+            kind: MouseEventKind::Up(MouseButton::Left),
             column,
             row,
             modifiers: crossterm::event::KeyModifiers::NONE,

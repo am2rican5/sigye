@@ -7,6 +7,7 @@ use ratatui::Frame;
 use sigye_core::DisplayMode;
 
 use crate::context::RenderContext;
+use crate::render::{self, FooterAction};
 
 /// Trait implemented by each display mode (Clock, Pomodoro, Timer, etc.).
 ///
@@ -27,8 +28,13 @@ pub trait Mode {
     /// Handle a key event. Return `true` if the key was consumed.
     fn handle_key(&mut self, key: KeyEvent, ctx: &mut RenderContext) -> bool;
 
-    /// Return key hint pairs for the mode indicator bar: (key_label, description).
-    fn key_hints(&self) -> Vec<(&'static str, &'static str)>;
+    /// Return actions shown in the mode footer.
+    fn footer_actions(&self) -> Vec<FooterAction>;
+
+    /// Return mode actions followed by the shared application actions.
+    fn all_footer_actions(&self) -> Vec<FooterAction> {
+        render::with_global_footer_actions(&self.footer_actions())
+    }
 
     /// Downcast support for mode-specific operations.
     fn as_any_mut(&mut self) -> &mut dyn Any;

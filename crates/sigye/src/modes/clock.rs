@@ -215,6 +215,8 @@ impl Mode for ClockMode {
 
     fn render(&self, frame: &mut Frame, ctx: &RenderContext) {
         let area = frame.area();
+        let actions = self.all_footer_actions();
+        let footer_height = render::footer_height(area.width, &actions);
 
         let font = ctx.font_registry.get_or_default(&ctx.current_font);
         let font_height = font.height as u16;
@@ -237,7 +239,7 @@ impl Mode for ClockMode {
                 Constraint::Length(1),
                 Constraint::Fill(1),
                 Constraint::Length(1),
-                Constraint::Length(1),
+                Constraint::Length(footer_height),
             ])
             .split(area)
         };
@@ -386,7 +388,7 @@ impl Mode for ClockMode {
             );
         }
 
-        render::render_key_hints(frame, chunks[8], ctx, &self.key_hints());
+        render::render_footer(frame, chunks[8], ctx, &actions);
     }
 
     fn handle_key(&mut self, key: KeyEvent, ctx: &mut RenderContext) -> bool {
@@ -424,16 +426,14 @@ impl Mode for ClockMode {
         }
     }
 
-    fn key_hints(&self) -> Vec<(&'static str, &'static str)> {
+    fn footer_actions(&self) -> Vec<render::FooterAction> {
         vec![
-            ("z", "minimal"),
-            ("f", "format"),
-            ("u", "copy unix"),
-            ("i", "copy iso"),
-            ("t", "12/24h"),
-            ("c", "color"),
-            ("s", "settings"),
-            ("?", "help"),
+            render::FooterAction::new(KeyCode::Char('z'), "z", "minimal"),
+            render::FooterAction::new(KeyCode::Char('f'), "f", "format"),
+            render::FooterAction::new(KeyCode::Char('u'), "u", "copy unix"),
+            render::FooterAction::new(KeyCode::Char('i'), "i", "copy iso"),
+            render::FooterAction::new(KeyCode::Char('t'), "t", "12/24h"),
+            render::FooterAction::new(KeyCode::Char('c'), "c", "color"),
         ]
     }
 

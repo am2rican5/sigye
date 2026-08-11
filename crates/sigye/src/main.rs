@@ -14,7 +14,10 @@ mod weather;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::{
     DefaultTerminal, Frame,
     style::{Color, Style},
@@ -39,6 +42,51 @@ use settings::SettingsDialog;
 use sigye_background::BackgroundState;
 use system_metrics::SystemMonitor;
 use weather::WeatherMonitor;
+
+fn footer_key_at(
+    mode: &dyn Mode,
+    area: ratatui::layout::Rect,
+    column: u16,
+    row: u16,
+) -> Option<KeyCode> {
+    let actions = mode.all_footer_actions();
+    let height = render::footer_height(area.width, &actions);
+    let footer_area = ratatui::layout::Rect::new(
+        area.x,
+        area.bottom().saturating_sub(height),
+        area.width,
+        height,
+    );
+    render::footer_action_at(&render::footer_layout(footer_area, &actions), column, row)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootMouseAction {
+    None,
+    Key(KeyCode),
+    Quit,
+}
+
+fn root_mouse_action(
+    mode: &dyn Mode,
+    screensaver: bool,
+    minimal_clock: bool,
+    area: ratatui::layout::Rect,
+    mouse: MouseEvent,
+) -> RootMouseAction {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return RootMouseAction::None;
+    }
+    if screensaver {
+        return RootMouseAction::Quit;
+    }
+    if minimal_clock && mode.display_mode() == DisplayMode::Clock {
+        return RootMouseAction::Key(KeyCode::Char('z'));
+    }
+    footer_key_at(mode, area, mouse.column, mouse.row)
+        .map(RootMouseAction::Key)
+        .unwrap_or(RootMouseAction::None)
+}
 
 /// A beautiful terminal clock with ASCII art fonts, animations, and backgrounds.
 #[derive(Parser)]
@@ -127,9 +175,22 @@ fn main() -> color_eyre::Result<()> {
     }
 
     let terminal = ratatui::init();
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
+        previous_hook(panic_info);
+    }));
+    if let Err(error) = crossterm::execute!(std::io::stdout(), EnableMouseCapture) {
+        ratatui::restore();
+        return Err(error.into());
+    }
+
     let result = App::new_with_cli(cli).run(terminal);
+    let mouse_restore = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
-    result
+    result?;
+    mouse_restore?;
+    Ok(())
 }
 
 /// The main application which holds the state and logic of the application.
@@ -164,6 +225,8 @@ pub struct App {
     demo_bg_cycle: Instant,
     /// Timer for demo mode font cycling.
     demo_font_cycle: Instant,
+    /// Terminal area from the latest frame, used to resolve mouse hit targets.
+    frame_area: ratatui::layout::Rect,
 }
 
 impl App {
@@ -262,6 +325,7 @@ impl App {
             demo_theme_cycle: Instant::now(),
             demo_bg_cycle: Instant::now(),
             demo_font_cycle: Instant::now(),
+            frame_area: ratatui::layout::Rect::default(),
         }
     }
 
@@ -383,6 +447,7 @@ impl App {
 
     /// Renders the user interface.
     fn render(&mut self, frame: &mut Frame) {
+        self.frame_area = frame.area();
         // Demo mode auto-cycling
         if self.demo_mode {
             if self.demo_theme_cycle.elapsed() >= Duration::from_secs(5) {
@@ -467,7 +532,7 @@ impl App {
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key),
-                Event::Mouse(_) => {}
+                Event::Mouse(mouse) => self.on_mouse_event(mouse),
                 Event::Resize(_, _) => {}
                 _ => {}
             }
@@ -539,6 +604,46 @@ impl App {
         }
     }
 
+    fn on_mouse_event(&mut self, mouse: MouseEvent) {
+        if self.show_help {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.show_help = false;
+            }
+            return;
+        }
+        if self.countdown_dialog.visible {
+            let action = self.countdown_dialog.handle_mouse(mouse, self.frame_area);
+            self.apply_countdown_action(action);
+            return;
+        }
+        if self.mode_dialog.visible {
+            let action = self.mode_dialog.handle_mouse(mouse, self.frame_area);
+            self.apply_mode_action(action);
+            return;
+        }
+        if self.settings_dialog.visible {
+            if let Some(code) = self.settings_dialog.handle_mouse(mouse, self.frame_area) {
+                self.handle_settings_key(KeyEvent::new(code, KeyModifiers::NONE));
+            }
+            return;
+        }
+
+        let mode = &*self.modes[self.active_mode_index];
+        match root_mouse_action(
+            mode,
+            self.ctx.screensaver_mode,
+            self.ctx.config.minimal_mode,
+            self.frame_area,
+            mouse,
+        ) {
+            RootMouseAction::None => {}
+            RootMouseAction::Key(code) => {
+                self.on_key_event(KeyEvent::new(code, KeyModifiers::NONE));
+            }
+            RootMouseAction::Quit => self.quit(),
+        }
+    }
+
     /// Open the mode picker dialog with the cursor on the active mode.
     fn open_mode_dialog(&mut self) {
         let current = self.modes[self.active_mode_index].display_mode();
@@ -547,7 +652,12 @@ impl App {
 
     /// Route key events to the mode picker and act on the result.
     fn handle_mode_dialog_key(&mut self, key: KeyEvent) {
-        match self.mode_dialog.handle_key(key) {
+        let action = self.mode_dialog.handle_key(key);
+        self.apply_mode_action(action);
+    }
+
+    fn apply_mode_action(&mut self, action: ModeAction) {
+        match action {
             ModeAction::Continue => {}
             ModeAction::Cancel => {}
             ModeAction::Select(mode) => {
@@ -566,7 +676,12 @@ impl App {
 
     /// Route key events to the countdown editor and persist on commit.
     fn handle_countdown_dialog_key(&mut self, key: KeyEvent) {
-        match self.countdown_dialog.handle_key(key) {
+        let action = self.countdown_dialog.handle_key(key);
+        self.apply_countdown_action(action);
+    }
+
+    fn apply_countdown_action(&mut self, action: CountdownAction) {
+        match action {
             CountdownAction::Continue => {}
             CountdownAction::Cancel => {}
             CountdownAction::Commit(events) => {
@@ -761,11 +876,7 @@ impl App {
         };
 
         let help_lines = vec![
-            Line::from(Span::styled(
-                "Keyboard Shortcuts",
-                Style::default().fg(accent).bold(),
-            ))
-            .centered(),
+            Line::from(Span::styled("Controls", Style::default().fg(accent).bold())).centered(),
             Line::from(""),
             Line::from(Span::styled("  Global", Style::default().fg(accent).bold())),
             key_line("    q / Esc     ", "Quit"),
@@ -808,7 +919,7 @@ impl App {
             key_line("    e           ", "Manage events (dialog)"),
             Line::from(""),
             Line::from(Span::styled(
-                "Press any key to close",
+                "Press any key or click to close",
                 Style::default().fg(dim),
             ))
             .centered(),
@@ -886,5 +997,47 @@ fn parse_display_mode(s: &str) -> Option<DisplayMode> {
         "worldclock" | "world-clock" | "world" => Some(DisplayMode::WorldClock),
         "countdown" | "life" => Some(DisplayMode::Countdown),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod mouse_tests {
+    use super::*;
+
+    fn click(button: MouseButton) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(button),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn footer_click_resolves_to_the_existing_key_action() {
+        let mode = TimerMode::new(5);
+        let area = ratatui::layout::Rect::new(0, 0, 80, 20);
+
+        assert_eq!(footer_key_at(&mode, area, 41, 19), Some(KeyCode::Char('q')));
+        assert_eq!(footer_key_at(&mode, area, 0, 19), None);
+    }
+
+    #[test]
+    fn root_mouse_behavior_handles_chrome_free_views() {
+        let mode = ClockMode::new();
+        let area = ratatui::layout::Rect::new(0, 0, 80, 20);
+
+        assert_eq!(
+            root_mouse_action(&mode, true, false, area, click(MouseButton::Left)),
+            RootMouseAction::Quit
+        );
+        assert_eq!(
+            root_mouse_action(&mode, false, true, area, click(MouseButton::Left)),
+            RootMouseAction::Key(KeyCode::Char('z'))
+        );
+        assert_eq!(
+            root_mouse_action(&mode, true, false, area, click(MouseButton::Right)),
+            RootMouseAction::None
+        );
     }
 }

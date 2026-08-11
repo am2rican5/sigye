@@ -92,7 +92,7 @@ cargo install --path crates/sigye
 sigye
 ```
 
-Press `s` to open the settings dialog, or use the keybindings below to adjust on the fly.
+Press `s` or click **settings** in the footer to open the settings dialog. Keyboard and mouse controls can be used interchangeably.
 
 ## CLI Options
 
@@ -130,6 +130,13 @@ sigye --mode pomodoro --font Doom --theme fire
 ```
 
 ## Keybindings
+
+### Mouse Controls
+
+- Click actions in the footer to switch modes, control timers, open settings or help, and quit.
+- Click dialog rows to select them; click `◀` / `▶` to change settings and use the mouse wheel to navigate long lists.
+- Click anywhere to close Help. In minimal clock view, a click restores the normal UI; in screensaver mode, a click exits.
+- Mouse capture is enabled while the TUI is running. Hold `Shift` while dragging if your terminal requires it for text selection.
 
 ### Global
 

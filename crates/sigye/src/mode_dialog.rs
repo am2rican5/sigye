@@ -1,9 +1,9 @@
 //! Mode selection dialog — pick a display mode from a list.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Clear, Paragraph},
@@ -11,6 +11,7 @@ use ratatui::{
 use sigye_core::DisplayMode;
 
 use crate::dialog::{centered_rect, dialog_block};
+use crate::render::{FooterAction, FooterButton, footer_action_at, footer_layout};
 
 /// All modes shown in the picker, in display order.
 const MODES: &[DisplayMode] = &[
@@ -21,6 +22,41 @@ const MODES: &[DisplayMode] = &[
     DisplayMode::WorldClock,
     DisplayMode::Countdown,
 ];
+
+struct ModeDialogLayout {
+    dialog_area: Rect,
+    list_area: Rect,
+    footer_area: Rect,
+}
+
+fn dialog_layout(area: Rect) -> ModeDialogLayout {
+    let dialog_width = 36u16.min(area.width.saturating_sub(4));
+    let dialog_height = (MODES.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let dialog_area = centered_rect(area, dialog_width, dialog_height);
+    let inner = dialog_block(" Mode ", Color::Reset).inner(dialog_area);
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Fill(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    ModeDialogLayout {
+        dialog_area,
+        list_area: Rect::new(
+            chunks[1].x + 2,
+            chunks[1].y,
+            chunks[1].width.saturating_sub(4),
+            chunks[1].height,
+        ),
+        footer_area: chunks[3],
+    }
+}
+
+fn mode_dialog_buttons(area: Rect) -> Vec<FooterButton> {
+    footer_layout(area, &[FooterAction::new(KeyCode::Esc, "Esc", "cancel")])
+}
 
 /// Outcome of a key event in the dialog.
 pub enum ModeAction {
@@ -93,6 +129,37 @@ impl ModeDialog {
         }
     }
 
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> ModeAction {
+        let layout = dialog_layout(area);
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.selected = self.selected.saturating_sub(1);
+            }
+            MouseEventKind::ScrollDown => {
+                self.selected = (self.selected + 1).min(MODES.len() - 1);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if layout.list_area.contains((mouse.column, mouse.row).into()) {
+                    let index = (mouse.row - layout.list_area.y) as usize;
+                    if let Some(&mode) = MODES.get(index) {
+                        self.close();
+                        return ModeAction::Select(mode);
+                    }
+                } else if footer_action_at(
+                    &mode_dialog_buttons(layout.footer_area),
+                    mouse.column,
+                    mouse.row,
+                ) == Some(KeyCode::Esc)
+                {
+                    self.close();
+                    return ModeAction::Cancel;
+                }
+            }
+            _ => {}
+        }
+        ModeAction::Continue
+    }
+
     /// Render the dialog. `current` marks the active mode with a dot.
     pub fn render(
         &self,
@@ -107,25 +174,13 @@ impl ModeDialog {
             return;
         }
 
-        let dialog_width = 36u16.min(area.width.saturating_sub(4));
-        // border(2) + padding(2) + entries + help(1) + spacer(1)
-        let dialog_height = (MODES.len() as u16 + 6).min(area.height.saturating_sub(2));
-
-        let dialog_area = centered_rect(area, dialog_width, dialog_height);
+        let layout = dialog_layout(area);
+        let dialog_area = layout.dialog_area;
 
         frame.render_widget(Clear, dialog_area);
 
         let block = dialog_block(" Mode ", accent);
-        let inner = block.inner(dialog_area);
         frame.render_widget(block, dialog_area);
-
-        let chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(inner);
 
         // Build list lines
         let mut lines: Vec<Line> = Vec::with_capacity(MODES.len());
@@ -151,25 +206,21 @@ impl ModeDialog {
             ]));
         }
 
-        let list_area = Rect::new(
-            chunks[1].x + 2,
-            chunks[1].y,
-            chunks[1].width.saturating_sub(4),
-            chunks[1].height,
-        );
-        frame.render_widget(Paragraph::new(lines), list_area);
+        frame.render_widget(Paragraph::new(lines), layout.list_area);
 
-        let help = Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(accent).bold()),
-            Span::styled(" nav  ", Style::default().fg(muted)),
-            Span::styled("1-6", Style::default().fg(accent).bold()),
-            Span::styled(" jump  ", Style::default().fg(muted)),
-            Span::styled("Enter", Style::default().fg(accent).bold()),
-            Span::styled(" pick  ", Style::default().fg(muted)),
-            Span::styled("Esc", Style::default().fg(accent).bold()),
-            Span::styled(" cancel", Style::default().fg(muted)),
-        ]);
-        frame.render_widget(Paragraph::new(help).alignment(Alignment::Center), chunks[3]);
+        for button in mode_dialog_buttons(layout.footer_area) {
+            let text = Line::from(vec![
+                Span::styled(
+                    format!("[{}]", button.action.key_label),
+                    Style::default().fg(accent).bold(),
+                ),
+                Span::styled(
+                    format!(" {}", button.action.label),
+                    Style::default().fg(muted),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(text), button.area);
+        }
     }
 }
 
@@ -187,6 +238,47 @@ mod tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
         }
+    }
+
+    fn click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn clicking_a_mode_row_selects_it() {
+        let mut d = ModeDialog::new();
+        d.open(DisplayMode::Clock);
+        let layout = dialog_layout(Rect::new(0, 0, 50, 16));
+
+        let action = d.handle_mouse(
+            click(layout.list_area.x, layout.list_area.y + 1),
+            Rect::new(0, 0, 50, 16),
+        );
+
+        assert!(matches!(action, ModeAction::Select(DisplayMode::Pomodoro)));
+        assert!(!d.visible);
+    }
+
+    #[test]
+    fn only_the_visible_mode_cancel_button_cancels() {
+        let mut d = ModeDialog::new();
+        d.open(DisplayMode::Clock);
+        let area = Rect::new(0, 0, 50, 16);
+        let layout = dialog_layout(area);
+        let button = mode_dialog_buttons(layout.footer_area)[0];
+
+        let blank = d.handle_mouse(click(layout.footer_area.x, layout.footer_area.y), area);
+        assert!(matches!(blank, ModeAction::Continue));
+        assert!(d.visible);
+
+        let cancel = d.handle_mouse(click(button.area.x, button.area.y), area);
+        assert!(matches!(cancel, ModeAction::Cancel));
+        assert!(!d.visible);
     }
 
     #[test]
@@ -252,6 +344,6 @@ mod tests {
             .draw(|frame| d.render(frame, frame.area(), accent, dim, muted, DisplayMode::Clock))
             .unwrap();
 
-        assert_eq!(color_of_text(terminal.backend(), " nav  "), Some(muted));
+        assert_eq!(color_of_text(terminal.backend(), " cancel"), Some(muted));
     }
 }

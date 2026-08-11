@@ -219,25 +219,27 @@ impl CountdownMode {
     /// and surface the single key needed to get started.
     fn render_onboarding(&self, frame: &mut Frame, ctx: &RenderContext) {
         let area = frame.area();
+        let actions = self.all_footer_actions();
+        let footer_height = render::footer_height(area.width, &actions);
         let accent = ctx.color();
         let dim = ctx.dim_color();
         let muted = ctx.muted_color();
 
         let chunks = Layout::vertical([
-            Constraint::Fill(1),   // [0] top spacer
-            Constraint::Length(1), // [1] decorative bar
-            Constraint::Length(1), // [2] title
-            Constraint::Length(1), // [3] decorative bar
-            Constraint::Length(1), // [4] gap
-            Constraint::Length(1), // [5] tagline
-            Constraint::Length(2), // [6] gap
-            Constraint::Length(1), // [7] examples header
-            Constraint::Length(1), // [8] gap
-            Constraint::Length(4), // [9] 4 example rows
-            Constraint::Length(2), // [10] gap
-            Constraint::Length(1), // [11] call-to-action
-            Constraint::Fill(1),   // [12] bottom spacer
-            Constraint::Length(1), // [13] hints
+            Constraint::Fill(1),               // [0] top spacer
+            Constraint::Length(1),             // [1] decorative bar
+            Constraint::Length(1),             // [2] title
+            Constraint::Length(1),             // [3] decorative bar
+            Constraint::Length(1),             // [4] gap
+            Constraint::Length(1),             // [5] tagline
+            Constraint::Length(2),             // [6] gap
+            Constraint::Length(1),             // [7] examples header
+            Constraint::Length(1),             // [8] gap
+            Constraint::Length(4),             // [9] 4 example rows
+            Constraint::Length(2),             // [10] gap
+            Constraint::Length(1),             // [11] call-to-action
+            Constraint::Fill(1),               // [12] bottom spacer
+            Constraint::Length(footer_height), // [13] hints
         ])
         .split(area);
 
@@ -290,7 +292,7 @@ impl CountdownMode {
         ]);
         frame.render_widget(Paragraph::new(cta).alignment(Alignment::Center), chunks[11]);
 
-        render::render_key_hints(frame, chunks[13], ctx, &self.key_hints());
+        render::render_footer(frame, chunks[13], ctx, &actions);
     }
 }
 
@@ -322,19 +324,21 @@ impl Mode for CountdownMode {
 
         let event = &events[self.active_index.min(events.len() - 1)];
         let view = compute_event_view(event);
+        let actions = self.all_footer_actions();
+        let footer_height = render::footer_height(area.width, &actions);
 
         let font = ctx.font_registry.get_or_default(&ctx.current_font);
         let font_height = font.height as u16;
 
         let chunks = Layout::vertical([
-            Constraint::Fill(1),             // [0] top padding
-            Constraint::Length(font_height), // [1] big ASCII number
-            Constraint::Length(1),           // [2] gap
-            Constraint::Length(1),           // [3] status label
-            Constraint::Length(1),           // [4] target date
-            Constraint::Fill(1),             // [5] bottom padding
-            Constraint::Length(1),           // [6] pager (n of N)
-            Constraint::Length(1),           // [7] hints
+            Constraint::Fill(1),               // [0] top padding
+            Constraint::Length(font_height),   // [1] big ASCII number
+            Constraint::Length(1),             // [2] gap
+            Constraint::Length(1),             // [3] status label
+            Constraint::Length(1),             // [4] target date
+            Constraint::Fill(1),               // [5] bottom padding
+            Constraint::Length(1),             // [6] pager (n of N)
+            Constraint::Length(footer_height), // [7] hints
         ])
         .split(area);
 
@@ -349,7 +353,7 @@ impl Mode for CountdownMode {
             render::render_centered_text(frame, chunks[6], &pager, ctx.dim_color());
         }
 
-        render::render_key_hints(frame, chunks[7], ctx, &self.key_hints());
+        render::render_footer(frame, chunks[7], ctx, &actions);
     }
 
     fn handle_key(&mut self, key: KeyEvent, ctx: &mut RenderContext) -> bool {
@@ -374,13 +378,12 @@ impl Mode for CountdownMode {
         }
     }
 
-    fn key_hints(&self) -> Vec<(&'static str, &'static str)> {
+    fn footer_actions(&self) -> Vec<render::FooterAction> {
         vec![
-            ("n/p", "next/prev event"),
-            ("e", "edit events"),
-            ("c", "color"),
-            ("s", "settings"),
-            ("?", "help"),
+            render::FooterAction::new(KeyCode::Char('p'), "p", "previous"),
+            render::FooterAction::new(KeyCode::Char('n'), "n", "next"),
+            render::FooterAction::new(KeyCode::Char('e'), "e", "events"),
+            render::FooterAction::new(KeyCode::Char('c'), "c", "color"),
         ]
     }
 

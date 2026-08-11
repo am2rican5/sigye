@@ -211,8 +211,13 @@ mod tui {
         String::from_utf8_lossy(&plain).into_owned()
     }
 
+    fn click(writer: &mut impl Write, column: u16, row: u16) {
+        write!(writer, "\x1b[<0;{column};{row}M").expect("send mouse click");
+        writer.flush().expect("flush mouse click");
+    }
+
     #[test]
-    fn tui_renders_help_and_restores_terminal() {
+    fn tui_mouse_controls_footer_and_restores_terminal() {
         let temp = TempDir::new();
         let temp_path = temp.0.clone();
         let pair = native_pty_system()
@@ -259,30 +264,40 @@ mod tui {
             );
         }
 
-        writer.write_all(b"?").expect("open help");
-        writer.flush().expect("flush help key");
-        let help_rendered = receive_until(&receiver, &mut output, |text| {
-            text.contains("Keyboard Shortcuts")
-        });
-        if !help_rendered {
+        // Footer positions are literal 1-based terminal coordinates at 120x40.
+        click(&mut writer, 88, 40);
+        let settings_rendered =
+            receive_until(&receiver, &mut output, |text| text.contains("[Enter] save"));
+        if !settings_rendered {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("help did not render within five seconds");
+            panic!(
+                "mouse click did not open settings within five seconds; output: {:?}",
+                visible_text(&output)
+            );
         }
 
-        writer.write_all(b"x").expect("dismiss help");
-        writer.flush().expect("flush dismiss key");
+        writer.write_all(b"\x1b").expect("close settings");
+        writer.flush().expect("flush close key");
         match receiver.recv_timeout(Duration::from_secs(5)) {
             Ok(chunk) => output.extend(chunk),
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                panic!("help did not dismiss within five seconds");
+                panic!("settings did not close within five seconds");
             }
         }
 
-        writer.write_all(b"q").expect("quit TUI");
-        writer.flush().expect("flush quit key");
+        click(&mut writer, 102, 40);
+        let help_rendered = receive_until(&receiver, &mut output, |text| text.contains("Controls"));
+        if !help_rendered {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("mouse click did not open help within five seconds");
+        }
+
+        click(&mut writer, 1, 1);
+        click(&mut writer, 112, 40);
         drop(writer);
         let deadline = Instant::now() + Duration::from_secs(5);
         let status = loop {
@@ -301,21 +316,28 @@ mod tui {
         }
         reader_thread.join().expect("join PTY reader");
 
-        let text = visible_text(&output);
         let enter = output
             .windows(8)
             .position(|bytes| bytes == b"\x1b[?1049h")
             .expect("enter alternate screen");
+        let mouse_on = output
+            .windows(8)
+            .position(|bytes| bytes == b"\x1b[?1000h")
+            .expect("enable mouse capture");
         let render = output
             .windows(b"[s]".len())
             .position(|bytes| bytes == b"[s]")
             .expect("render content");
+        let mouse_off = output
+            .windows(8)
+            .position(|bytes| bytes == b"\x1b[?1000l")
+            .expect("disable mouse capture");
         let leave = output
             .windows(8)
             .position(|bytes| bytes == b"\x1b[?1049l")
             .expect("leave alternate screen");
-        assert!(enter < render && render < leave);
-        assert!(text.contains("Keyboard Shortcuts"));
+        assert!(enter < mouse_on && mouse_on < render);
+        assert!(render < mouse_off && mouse_off < leave);
         assert!(status.success(), "exit status: {}", status.exit_code());
 
         drop(temp);

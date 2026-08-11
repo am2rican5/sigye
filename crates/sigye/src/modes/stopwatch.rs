@@ -90,6 +90,8 @@ impl Mode for StopwatchMode {
 
     fn render(&self, frame: &mut Frame, ctx: &RenderContext) {
         let area = frame.area();
+        let actions = self.all_footer_actions();
+        let footer_height = render::footer_height(area.width, &actions);
         let font = ctx.font_registry.get_or_default(&ctx.current_font);
         let font_height = font.height as u16;
 
@@ -104,7 +106,7 @@ impl Mode for StopwatchMode {
             Constraint::Length(1),                // status
             Constraint::Length(lap_count.max(1)), // laps area
             Constraint::Fill(1),
-            Constraint::Length(1), // hints
+            Constraint::Length(footer_height), // hints
         ])
         .split(area);
 
@@ -180,7 +182,7 @@ impl Mode for StopwatchMode {
             }
         }
 
-        render::render_key_hints(frame, chunks[6], ctx, &self.key_hints());
+        render::render_footer(frame, chunks[6], ctx, &actions);
     }
 
     fn handle_key(&mut self, key: KeyEvent, _ctx: &mut RenderContext) -> bool {
@@ -201,12 +203,11 @@ impl Mode for StopwatchMode {
         }
     }
 
-    fn key_hints(&self) -> Vec<(&'static str, &'static str)> {
+    fn footer_actions(&self) -> Vec<render::FooterAction> {
         vec![
-            ("Space", "start/pause"),
-            ("r", "reset"),
-            ("l", "lap"),
-            ("?", "help"),
+            render::FooterAction::new(KeyCode::Char(' '), "Space", "start/pause"),
+            render::FooterAction::new(KeyCode::Char('r'), "r", "reset"),
+            render::FooterAction::new(KeyCode::Char('l'), "l", "lap"),
         ]
     }
 

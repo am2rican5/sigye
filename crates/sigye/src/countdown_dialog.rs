@@ -1,6 +1,6 @@
 //! Countdown event management dialog — list, add, edit, delete countdown events.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -12,6 +12,7 @@ use sigye_config::CountdownEvent;
 
 use crate::dialog::{centered_rect, dialog_block, inset};
 use crate::modes::countdown::validate_target;
+use crate::render::{FooterAction, FooterButton, footer_action_at, footer_layout};
 
 /// Dialog outcome surfaced to the App's key handler.
 pub enum CountdownAction {
@@ -32,7 +33,7 @@ enum View {
 }
 
 /// Field within the edit form.
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum FormField {
     Name,
     Target,
@@ -52,6 +53,94 @@ struct EditForm {
 const NAME_MAX: usize = 40;
 const TARGET_MAX: usize = 32;
 
+struct CountdownListAreas {
+    dialog_area: Rect,
+    list_area: Rect,
+    footer_area: Rect,
+}
+
+fn countdown_list_areas(area: Rect, event_count: usize) -> CountdownListAreas {
+    let dialog_width = 60u16.min(area.width.saturating_sub(4));
+    let row_count = event_count.clamp(3, 10) as u16;
+    let dialog_height = (row_count + 5).min(area.height.saturating_sub(2));
+    let dialog_area = centered_rect(area, dialog_width, dialog_height);
+    let inner = dialog_block(" Countdown Events ", Color::Reset).inner(dialog_area);
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Fill(1),
+        Constraint::Length(2),
+    ])
+    .split(inner);
+
+    CountdownListAreas {
+        dialog_area,
+        list_area: inset(chunks[1], 2),
+        footer_area: chunks[2],
+    }
+}
+
+fn countdown_list_buttons(area: Rect) -> Vec<FooterButton> {
+    footer_layout(
+        area,
+        &[
+            FooterAction::new(KeyCode::Char('a'), "a", "add"),
+            FooterAction::new(KeyCode::Char('e'), "e", "edit"),
+            FooterAction::new(KeyCode::Char('d'), "d", "delete"),
+            FooterAction::new(KeyCode::Enter, "Enter", "save"),
+            FooterAction::new(KeyCode::Esc, "Esc", "cancel"),
+        ],
+    )
+}
+
+struct CountdownEditAreas {
+    dialog_area: Rect,
+    name_area: Rect,
+    target_area: Rect,
+    hint_area: Rect,
+    since_area: Rect,
+    error_area: Rect,
+    footer_area: Rect,
+}
+
+fn countdown_edit_areas(area: Rect) -> CountdownEditAreas {
+    let dialog_width = 56u16.min(area.width.saturating_sub(4));
+    let dialog_height = 13u16.min(area.height.saturating_sub(2));
+    let dialog_area = centered_rect(area, dialog_width, dialog_height);
+    let inner = dialog_block(" Edit Event ", Color::Reset).inner(dialog_area);
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Fill(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    CountdownEditAreas {
+        dialog_area,
+        name_area: inset(chunks[1], 2),
+        target_area: inset(chunks[2], 2),
+        hint_area: inset(chunks[3], 2),
+        since_area: inset(chunks[4], 2),
+        error_area: chunks[6],
+        footer_area: chunks[8],
+    }
+}
+
+fn countdown_edit_buttons(area: Rect) -> Vec<FooterButton> {
+    footer_layout(
+        area,
+        &[
+            FooterAction::new(KeyCode::Enter, "Enter", "commit"),
+            FooterAction::new(KeyCode::Esc, "Esc", "back"),
+        ],
+    )
+}
+
 /// Countdown event management dialog state.
 #[derive(Default)]
 pub struct CountdownDialog {
@@ -60,6 +149,8 @@ pub struct CountdownDialog {
     /// Working buffer of events; only flushed back to config on Commit.
     events: Vec<CountdownEvent>,
     selected: usize,
+    scroll_offset: usize,
+    visible_rows: usize,
     form: Option<EditForm>,
     /// Last validation error (cleared when the user types).
     error: Option<String>,
@@ -77,6 +168,7 @@ impl CountdownDialog {
         let n = events.len();
         self.events = events;
         self.selected = if n == 0 { 0 } else { self.selected.min(n - 1) };
+        self.scroll_offset = 0;
         self.form = None;
         self.error = None;
     }
@@ -91,6 +183,76 @@ impl CountdownDialog {
         match self.view {
             View::List => self.handle_list_key(key),
             View::Edit => self.handle_edit_key(key),
+        }
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> CountdownAction {
+        if self.view == View::List && !self.events.is_empty() {
+            let visible_rows = countdown_list_areas(area, self.events.len())
+                .list_area
+                .height;
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    self.selected = self.selected.saturating_sub(1);
+                    self.ensure_selection_visible(visible_rows as usize);
+                    return CountdownAction::Continue;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.selected = (self.selected + 1).min(self.events.len() - 1);
+                    self.ensure_selection_visible(visible_rows as usize);
+                    return CountdownAction::Continue;
+                }
+                _ => {}
+            }
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            match self.view {
+                View::List => {
+                    let areas = countdown_list_areas(area, self.events.len());
+                    if let Some(code) = footer_action_at(
+                        &countdown_list_buttons(areas.footer_area),
+                        mouse.column,
+                        mouse.row,
+                    ) {
+                        return self.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+                    }
+                    if areas.list_area.contains((mouse.column, mouse.row).into()) {
+                        let index = self.scroll_offset + (mouse.row - areas.list_area.y) as usize;
+                        if index < self.events.len() {
+                            self.selected = index;
+                        }
+                    }
+                }
+                View::Edit => {
+                    let areas = countdown_edit_areas(area);
+                    if let Some(code) = footer_action_at(
+                        &countdown_edit_buttons(areas.footer_area),
+                        mouse.column,
+                        mouse.row,
+                    ) {
+                        return self.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+                    }
+                    if let Some(form) = self.form.as_mut() {
+                        if areas.name_area.contains((mouse.column, mouse.row).into()) {
+                            form.field = FormField::Name;
+                        } else if areas.target_area.contains((mouse.column, mouse.row).into()) {
+                            form.field = FormField::Target;
+                        } else if areas.since_area.contains((mouse.column, mouse.row).into()) {
+                            form.field = FormField::Since;
+                            form.since = !form.since;
+                        }
+                    }
+                }
+            }
+        }
+        CountdownAction::Continue
+    }
+
+    fn ensure_selection_visible(&mut self, visible_rows: usize) {
+        if self.selected < self.scroll_offset {
+            self.scroll_offset = self.selected;
+        } else if self.selected >= self.scroll_offset + visible_rows {
+            self.scroll_offset = self.selected + 1 - visible_rows;
         }
     }
 
@@ -112,12 +274,14 @@ impl CountdownDialog {
                     } else {
                         self.selected - 1
                     };
+                    self.ensure_selection_visible(self.visible_rows.max(1));
                 }
                 CountdownAction::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 if !self.events.is_empty() {
                     self.selected = (self.selected + 1) % self.events.len();
+                    self.ensure_selection_visible(self.visible_rows.max(1));
                 }
                 CountdownAction::Continue
             }
@@ -139,6 +303,7 @@ impl CountdownDialog {
                     } else if self.selected >= self.events.len() {
                         self.selected = self.events.len() - 1;
                     }
+                    self.ensure_selection_visible(self.visible_rows.max(1));
                 }
                 CountdownAction::Continue
             }
@@ -290,7 +455,14 @@ impl CountdownDialog {
     }
 
     /// Render the dialog (list or edit view depending on state).
-    pub fn render(&self, frame: &mut Frame, area: Rect, accent: Color, dim: Color, muted: Color) {
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        accent: Color,
+        dim: Color,
+        muted: Color,
+    ) {
         if !self.visible {
             return;
         }
@@ -300,28 +472,24 @@ impl CountdownDialog {
         }
     }
 
-    fn render_list(&self, frame: &mut Frame, area: Rect, accent: Color, dim: Color, muted: Color) {
-        let dialog_width = 60u16.min(area.width.saturating_sub(4));
-        // border(2) + padding(2) + title(1) + entries (cap 10) + help(2)
-        let row_count = self.events.len().clamp(1, 10) as u16;
-        let dialog_height = (row_count + 7).min(area.height.saturating_sub(2));
-
-        let dialog_area = centered_rect(area, dialog_width, dialog_height);
+    fn render_list(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        accent: Color,
+        dim: Color,
+        muted: Color,
+    ) {
+        let areas = countdown_list_areas(area, self.events.len());
+        let dialog_area = areas.dialog_area;
         frame.render_widget(Clear, dialog_area);
 
         let block = dialog_block(" Countdown Events ", accent);
-        let inner = block.inner(dialog_area);
         frame.render_widget(block, dialog_area);
 
-        let chunks = Layout::vertical([
-            Constraint::Length(1), // top pad
-            Constraint::Fill(1),   // list
-            Constraint::Length(1), // help line 1
-            Constraint::Length(1), // help line 2
-        ])
-        .split(inner);
-
-        let list_area = inset(chunks[1], 2);
+        let list_area = areas.list_area;
+        self.visible_rows = list_area.height as usize;
+        self.ensure_selection_visible(self.visible_rows.max(1));
         if self.events.is_empty() {
             let lines = vec![
                 Line::from(""),
@@ -335,8 +503,14 @@ impl CountdownDialog {
             ];
             frame.render_widget(Paragraph::new(lines), list_area);
         } else {
-            let mut lines: Vec<Line> = Vec::with_capacity(self.events.len());
-            for (i, ev) in self.events.iter().enumerate() {
+            let mut lines: Vec<Line> = Vec::with_capacity(list_area.height as usize);
+            for (i, ev) in self
+                .events
+                .iter()
+                .enumerate()
+                .skip(self.scroll_offset)
+                .take(list_area.height as usize)
+            {
                 let is_selected = i == self.selected;
                 let marker = if is_selected { "►" } else { " " };
                 let direction = if ev.since { "since" } else { "until" };
@@ -354,30 +528,19 @@ impl CountdownDialog {
             frame.render_widget(Paragraph::new(lines), list_area);
         }
 
-        let help_a = Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(accent).bold()),
-            Span::styled(" nav  ", Style::default().fg(muted)),
-            Span::styled("a", Style::default().fg(accent).bold()),
-            Span::styled(" add  ", Style::default().fg(muted)),
-            Span::styled("e", Style::default().fg(accent).bold()),
-            Span::styled(" edit  ", Style::default().fg(muted)),
-            Span::styled("d", Style::default().fg(accent).bold()),
-            Span::styled(" delete", Style::default().fg(muted)),
-        ]);
-        let help_b = Line::from(vec![
-            Span::styled("Enter", Style::default().fg(accent).bold()),
-            Span::styled(" save  ", Style::default().fg(muted)),
-            Span::styled("Esc", Style::default().fg(accent).bold()),
-            Span::styled(" cancel", Style::default().fg(muted)),
-        ]);
-        frame.render_widget(
-            Paragraph::new(help_a).alignment(Alignment::Center),
-            chunks[2],
-        );
-        frame.render_widget(
-            Paragraph::new(help_b).alignment(Alignment::Center),
-            chunks[3],
-        );
+        for button in countdown_list_buttons(areas.footer_area) {
+            let text = Line::from(vec![
+                Span::styled(
+                    format!("[{}]", button.action.key_label),
+                    Style::default().fg(accent).bold(),
+                ),
+                Span::styled(
+                    format!(" {}", button.action.label),
+                    Style::default().fg(muted),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(text), button.area);
+        }
     }
 
     fn render_edit(&self, frame: &mut Frame, area: Rect, accent: Color, dim: Color, muted: Color) {
@@ -386,9 +549,8 @@ impl CountdownDialog {
             None => return,
         };
 
-        let dialog_width = 56u16.min(area.width.saturating_sub(4));
-        let dialog_height = 13u16.min(area.height.saturating_sub(2));
-        let dialog_area = centered_rect(area, dialog_width, dialog_height);
+        let areas = countdown_edit_areas(area);
+        let dialog_area = areas.dialog_area;
         frame.render_widget(Clear, dialog_area);
 
         let title = if form.editing_index.is_some() {
@@ -397,23 +559,7 @@ impl CountdownDialog {
             " Add Event "
         };
         let block = dialog_block(title, accent);
-        let inner = block.inner(dialog_area);
         frame.render_widget(block, dialog_area);
-
-        let chunks = Layout::vertical([
-            Constraint::Length(1), // top pad
-            Constraint::Length(1), // name
-            Constraint::Length(1), // target
-            Constraint::Length(1), // hint under target
-            Constraint::Length(1), // since
-            Constraint::Length(1), // spacer
-            Constraint::Length(1), // error
-            Constraint::Fill(1),
-            Constraint::Length(1), // help
-        ])
-        .split(inner);
-
-        let row_area = |i: usize| inset(chunks[i], 2);
 
         frame.render_widget(
             Paragraph::new(self.render_text_field(
@@ -423,7 +569,7 @@ impl CountdownDialog {
                 accent,
                 muted,
             )),
-            row_area(1),
+            areas.name_area,
         );
         frame.render_widget(
             Paragraph::new(self.render_text_field(
@@ -433,14 +579,14 @@ impl CountdownDialog {
                 accent,
                 muted,
             )),
-            row_area(2),
+            areas.target_area,
         );
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "         e.g. 2026-06-01  or  2026-06-01T09:00:00+09:00",
                 Style::default().fg(dim),
             ))),
-            row_area(3),
+            areas.hint_area,
         );
         frame.render_widget(
             Paragraph::new(self.render_toggle_field(
@@ -450,7 +596,7 @@ impl CountdownDialog {
                 accent,
                 muted,
             )),
-            row_area(4),
+            areas.since_area,
         );
 
         if let Some(err) = &self.error {
@@ -460,19 +606,23 @@ impl CountdownDialog {
                     Style::default().fg(Color::LightRed),
                 )))
                 .alignment(Alignment::Center),
-                chunks[6],
+                areas.error_area,
             );
         }
 
-        let help = Line::from(vec![
-            Span::styled("Tab", Style::default().fg(accent).bold()),
-            Span::styled(" field  ", Style::default().fg(muted)),
-            Span::styled("Enter", Style::default().fg(accent).bold()),
-            Span::styled(" commit  ", Style::default().fg(muted)),
-            Span::styled("Esc", Style::default().fg(accent).bold()),
-            Span::styled(" cancel", Style::default().fg(muted)),
-        ]);
-        frame.render_widget(Paragraph::new(help).alignment(Alignment::Center), chunks[8]);
+        for button in countdown_edit_buttons(areas.footer_area) {
+            let text = Line::from(vec![
+                Span::styled(
+                    format!("[{}]", button.action.key_label),
+                    Style::default().fg(accent).bold(),
+                ),
+                Span::styled(
+                    format!(" {}", button.action.label),
+                    Style::default().fg(muted),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(text), button.area);
+        }
     }
 
     fn render_text_field(
@@ -547,6 +697,24 @@ mod tests {
         }
     }
 
+    fn click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn scroll_down(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
     fn ev(name: &str, target: &str) -> CountdownEvent {
         CountdownEvent {
             name: name.into(),
@@ -561,6 +729,97 @@ mod tests {
         d.open(vec![ev("Launch", "2026-06-01")]);
         assert!(d.visible);
         assert_eq!(d.events.len(), 1);
+    }
+
+    #[test]
+    fn clicking_a_countdown_row_selects_it_without_committing() {
+        let mut d = CountdownDialog::new();
+        d.open(vec![ev("A", "2026-01-01"), ev("B", "2026-02-01")]);
+        let area = Rect::new(0, 0, 80, 20);
+        let areas = countdown_list_areas(area, d.events.len());
+
+        let action = d.handle_mouse(click(areas.list_area.x, areas.list_area.y + 1), area);
+
+        assert!(matches!(action, CountdownAction::Continue));
+        assert_eq!(d.selected, 1);
+        assert!(d.visible);
+    }
+
+    #[test]
+    fn clicking_add_opens_the_countdown_form() {
+        let mut d = CountdownDialog::new();
+        d.open(vec![]);
+        let area = Rect::new(0, 0, 80, 20);
+        let areas = countdown_list_areas(area, 0);
+        let buttons = countdown_list_buttons(areas.footer_area);
+
+        let action = d.handle_mouse(click(buttons[0].area.x, buttons[0].area.y), area);
+
+        assert!(matches!(action, CountdownAction::Continue));
+        assert_eq!(d.view, View::Edit);
+    }
+
+    #[test]
+    fn clicking_since_focuses_and_toggles_the_field() {
+        let mut d = CountdownDialog::new();
+        d.open(vec![]);
+        d.handle_key(key(KeyCode::Char('a')));
+        let area = Rect::new(0, 0, 80, 20);
+        let areas = countdown_edit_areas(area);
+
+        d.handle_mouse(click(areas.since_area.x, areas.since_area.y), area);
+
+        let form = d.form.as_ref().unwrap();
+        assert_eq!(form.field, FormField::Since);
+        assert!(form.since);
+    }
+
+    #[test]
+    fn wheel_keeps_long_countdown_selection_visible() {
+        let mut d = CountdownDialog::new();
+        d.open(
+            (0..15)
+                .map(|index| ev(&format!("Event {index}"), "2026-01-01"))
+                .collect(),
+        );
+        let area = Rect::new(0, 0, 80, 20);
+        let list_area = countdown_list_areas(area, d.events.len()).list_area;
+
+        for _ in 0..14 {
+            d.handle_mouse(scroll_down(list_area.x, list_area.y), area);
+        }
+
+        assert_eq!(d.selected, 14);
+        assert_eq!(d.scroll_offset, 5);
+    }
+
+    #[test]
+    fn keyboard_keeps_selection_visible_in_short_terminals() {
+        let mut d = CountdownDialog::new();
+        d.open(
+            (0..15)
+                .map(|index| ev(&format!("Event {index}"), "2026-01-01"))
+                .collect(),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        terminal
+            .draw(|frame| {
+                d.render(
+                    frame,
+                    frame.area(),
+                    Color::Red,
+                    Color::DarkGray,
+                    Color::Gray,
+                )
+            })
+            .unwrap();
+
+        for _ in 0..5 {
+            d.handle_key(key(KeyCode::Down));
+        }
+
+        assert_eq!(d.selected, 5);
+        assert_eq!(d.scroll_offset, 3);
     }
 
     #[test]
@@ -706,7 +965,7 @@ mod tests {
 
         let backend = terminal.backend();
         assert_eq!(color_of_text(backend, " until"), Some(dim));
-        assert_eq!(color_of_text(backend, " nav  "), Some(muted));
+        assert_eq!(color_of_text(backend, " add"), Some(muted));
     }
 
     #[test]
@@ -729,6 +988,6 @@ mod tests {
         let backend = terminal.backend();
         assert_eq!(color_of_text(backend, "e.g. 2026-06-01"), Some(dim));
         assert_eq!(color_of_text(backend, "Launch"), Some(Color::White));
-        assert_eq!(color_of_text(backend, " field  "), Some(muted));
+        assert_eq!(color_of_text(backend, " commit"), Some(muted));
     }
 }

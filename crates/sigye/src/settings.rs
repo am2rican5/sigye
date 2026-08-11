@@ -1,5 +1,6 @@
 //! Settings dialog widget for configuring the clock.
 
+use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -10,6 +11,7 @@ use ratatui::{
 use sigye_core::{AnimationSpeed, AnimationStyle, BackgroundStyle, ColorTheme, TimeFormat};
 
 use crate::dialog::{centered_rect, dialog_block};
+use crate::render::{FooterAction, FooterButton, footer_action_at, footer_layout};
 
 /// The settings field currently being edited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,6 +64,47 @@ enum RowKind {
 struct DialogTextColors {
     dim: Color,
     muted: Color,
+}
+
+struct SettingsAreas {
+    dialog_area: Rect,
+    content_area: Rect,
+    help_area: Rect,
+}
+
+fn settings_areas(area: Rect, total_content_rows: u16) -> SettingsAreas {
+    let dialog_width = 50.min(area.width.saturating_sub(4));
+    let dialog_height = (total_content_rows + 5).min(area.height.saturating_sub(2));
+    let dialog_area = centered_rect(area, dialog_width, dialog_height);
+    let inner_area = dialog_block(" Settings ", Color::Reset).inner(dialog_area);
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Fill(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner_area);
+
+    SettingsAreas {
+        dialog_area,
+        content_area: Rect::new(
+            chunks[1].x + 2,
+            chunks[1].y,
+            chunks[1].width.saturating_sub(4),
+            chunks[1].height,
+        ),
+        help_area: chunks[3],
+    }
+}
+
+fn settings_footer_buttons(area: Rect) -> Vec<FooterButton> {
+    footer_layout(
+        area,
+        &[
+            FooterAction::new(KeyCode::Enter, "Enter", "save"),
+            FooterAction::new(KeyCode::Esc, "Esc", "cancel"),
+        ],
+    )
 }
 
 /// Snapshot of settings values taken when the dialog opens, used to revert on cancel.
@@ -326,6 +369,56 @@ impl SettingsDialog {
         }
     }
 
+    fn move_selection_clamped(&mut self, delta: i32) {
+        let fields = Self::field_order();
+        let index = fields
+            .iter()
+            .position(|field| *field == self.selected_field)
+            .unwrap_or(0) as i32;
+        let next = (index + delta).clamp(0, fields.len() as i32 - 1) as usize;
+        self.selected_field = fields[next];
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> Option<KeyCode> {
+        let rows = Self::section_layout();
+        let areas = settings_areas(area, rows.len() as u16);
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.move_selection_clamped(-1),
+            MouseEventKind::ScrollDown => self.move_selection_clamped(1),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(key) = footer_action_at(
+                    &settings_footer_buttons(areas.help_area),
+                    mouse.column,
+                    mouse.row,
+                ) {
+                    return Some(key);
+                }
+                if areas
+                    .content_area
+                    .contains((mouse.column, mouse.row).into())
+                {
+                    let row_index =
+                        self.scroll_offset + mouse.row.saturating_sub(areas.content_area.y);
+                    if let Some(RowKind::Field(field)) = rows.get(row_index as usize) {
+                        self.selected_field = *field;
+                        let row_area =
+                            Rect::new(areas.content_area.x, mouse.row, areas.content_area.width, 1);
+                        let (_, _, enabled) = self.field_label_value(*field);
+                        let (left, right) = self.field_arrow_areas(*field, row_area);
+                        if enabled && left.contains((mouse.column, mouse.row).into()) {
+                            return Some(KeyCode::Left);
+                        }
+                        if enabled && right.contains((mouse.column, mouse.row).into()) {
+                            return Some(KeyCode::Right);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
     /// Select next value for current field.
     pub fn next_value(&mut self) {
         match self.selected_field {
@@ -474,39 +567,16 @@ impl SettingsDialog {
 
         let layout = Self::section_layout();
         let total_content_rows = layout.len() as u16;
-
-        // Proportional dialog sizing
-        let dialog_width = 50.min(area.width.saturating_sub(4));
-        // +5 for: border top/bottom (2) + help row (1) + top padding (1) + bottom padding (1)
-        let dialog_height = (total_content_rows + 5).min(area.height.saturating_sub(2));
-
-        let dialog_area = centered_rect(area, dialog_width, dialog_height);
+        let areas = settings_areas(area, total_content_rows);
+        let dialog_area = areas.dialog_area;
 
         // Clear the area behind the dialog
         frame.render_widget(Clear, dialog_area);
 
         // Create block with border and explicit colors for light theme support
         let block = dialog_block(" Settings ", accent_color);
-
-        let inner_area = block.inner(dialog_area);
         frame.render_widget(block, dialog_area);
-
-        // Split inner area with padding around content
-        let chunks = Layout::vertical([
-            Constraint::Length(1), // Top padding
-            Constraint::Fill(1),   // Scrollable content area
-            Constraint::Length(1), // Bottom padding
-            Constraint::Length(1), // Help text
-        ])
-        .split(inner_area);
-
-        // Add horizontal padding (2 chars each side)
-        let content_area = Rect::new(
-            chunks[1].x + 2,
-            chunks[1].y,
-            chunks[1].width.saturating_sub(4),
-            chunks[1].height,
-        );
+        let content_area = areas.content_area;
         let visible_rows = content_area.height;
 
         // Ensure selected field is visible (adjust scroll)
@@ -579,18 +649,19 @@ impl SettingsDialog {
             );
         }
 
-        // Render help text
-        let help = Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(accent_color).bold()),
-            Span::styled(" nav  ", Style::default().fg(muted)),
-            Span::styled("←→", Style::default().fg(accent_color).bold()),
-            Span::styled(" change  ", Style::default().fg(muted)),
-            Span::styled("Enter", Style::default().fg(accent_color).bold()),
-            Span::styled(" save  ", Style::default().fg(muted)),
-            Span::styled("Esc", Style::default().fg(accent_color).bold()),
-            Span::styled(" cancel", Style::default().fg(muted)),
-        ]);
-        frame.render_widget(Paragraph::new(help).alignment(Alignment::Center), chunks[3]);
+        for button in settings_footer_buttons(areas.help_area) {
+            let help = Line::from(vec![
+                Span::styled(
+                    format!("[{}]", button.action.key_label),
+                    Style::default().fg(accent_color).bold(),
+                ),
+                Span::styled(
+                    format!(" {}", button.action.label),
+                    Style::default().fg(muted),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(help), button.area);
+        }
     }
 
     /// Render a section header line.
@@ -609,93 +680,90 @@ impl SettingsDialog {
         text_colors: DialogTextColors,
     ) -> Line<'static> {
         let selected = self.selected_field == field;
+        let (label, value, enabled) = self.field_label_value(field);
+        self.render_field_with_style(label, &value, selected, accent_color, enabled, text_colors)
+    }
+
+    fn field_label_value(&self, field: SettingsField) -> (&'static str, String, bool) {
         match field {
-            SettingsField::Font => self.render_field(
-                "Font",
-                self.selected_font(),
-                selected,
-                accent_color,
-                text_colors.muted,
-            ),
-            SettingsField::Color => self.render_field(
-                "Color",
-                self.color_theme.display_name(),
-                selected,
-                accent_color,
-                text_colors.muted,
-            ),
-            SettingsField::TimeFormat => {
-                let name = match self.time_format {
+            SettingsField::Font => ("Font", self.selected_font().to_string(), true),
+            SettingsField::Color => ("Color", self.color_theme.display_name().to_string(), true),
+            SettingsField::TimeFormat => (
+                "Format",
+                match self.time_format {
                     TimeFormat::TwentyFourHour => "24-hour",
                     TimeFormat::TwelveHour => "12-hour",
-                };
-                self.render_field("Format", name, selected, accent_color, text_colors.muted)
-            }
-            SettingsField::ShowSeconds => {
-                let v = if self.show_seconds { "On" } else { "Off" };
-                self.render_field("Seconds", v, selected, accent_color, text_colors.muted)
-            }
-            SettingsField::ColonBlink => {
-                let v = if self.colon_blink { "On" } else { "Off" };
-                self.render_field("Colon Blink", v, selected, accent_color, text_colors.muted)
-            }
-            SettingsField::Animation => self.render_field(
+                }
+                .to_string(),
+                true,
+            ),
+            SettingsField::ShowSeconds => (
+                "Seconds",
+                if self.show_seconds { "On" } else { "Off" }.to_string(),
+                true,
+            ),
+            SettingsField::ColonBlink => (
+                "Colon Blink",
+                if self.colon_blink { "On" } else { "Off" }.to_string(),
+                true,
+            ),
+            SettingsField::Animation => (
                 "Animation",
-                self.animation_style.display_name(),
-                selected,
-                accent_color,
-                text_colors.muted,
+                self.animation_style.display_name().to_string(),
+                true,
             ),
-            SettingsField::Speed => self.render_field_with_style(
+            SettingsField::Speed => (
                 "Speed",
-                self.animation_speed.display_name(),
-                selected,
-                accent_color,
+                self.animation_speed.display_name().to_string(),
                 self.animation_style != AnimationStyle::None,
-                text_colors,
             ),
-            SettingsField::Background => self.render_field(
+            SettingsField::Background => (
                 "Background",
-                self.background_style.display_name(),
-                selected,
-                accent_color,
-                text_colors.muted,
+                self.background_style.display_name().to_string(),
+                true,
             ),
             SettingsField::PomodoroWork => {
-                let v = format!("{} min", self.pomodoro_work_mins);
-                self.render_field("Work", &v, selected, accent_color, text_colors.muted)
+                ("Work", format!("{} min", self.pomodoro_work_mins), true)
             }
             SettingsField::PomodoroBreak => {
-                let v = format!("{} min", self.pomodoro_break_mins);
-                self.render_field("Break", &v, selected, accent_color, text_colors.muted)
+                ("Break", format!("{} min", self.pomodoro_break_mins), true)
             }
-            SettingsField::PomodoroLongBreak => {
-                let v = format!("{} min", self.pomodoro_long_break_mins);
-                self.render_field("Long Break", &v, selected, accent_color, text_colors.muted)
-            }
-            SettingsField::PomodoroSound => {
-                let v = if self.pomodoro_sound { "On" } else { "Off" };
-                self.render_field("Sound", v, selected, accent_color, text_colors.muted)
-            }
-            SettingsField::DesktopNotifications => {
-                let v = if self.desktop_notifications {
+            SettingsField::PomodoroLongBreak => (
+                "Long Break",
+                format!("{} min", self.pomodoro_long_break_mins),
+                true,
+            ),
+            SettingsField::PomodoroSound => (
+                "Sound",
+                if self.pomodoro_sound { "On" } else { "Off" }.to_string(),
+                true,
+            ),
+            SettingsField::DesktopNotifications => (
+                "Notifications",
+                if self.desktop_notifications {
                     "On"
                 } else {
                     "Off"
-                };
-                self.render_field(
-                    "Notifications",
-                    v,
-                    selected,
-                    accent_color,
-                    text_colors.muted,
-                )
-            }
-            SettingsField::TimerDuration => {
-                let v = format!("{} min", self.timer_duration_mins);
-                self.render_field("Duration", &v, selected, accent_color, text_colors.muted)
-            }
+                }
+                .to_string(),
+                true,
+            ),
+            SettingsField::TimerDuration => (
+                "Duration",
+                format!("{} min", self.timer_duration_mins),
+                true,
+            ),
         }
+    }
+
+    fn field_arrow_areas(&self, field: SettingsField, row_area: Rect) -> (Rect, Rect) {
+        let (label, value, _) = self.field_label_value(field);
+        let text_width = (label.chars().count() + value.chars().count() + 8) as u16;
+        let start_x = row_area.x + row_area.width.saturating_sub(text_width) / 2;
+        (
+            Rect::new(start_x + label.chars().count() as u16 + 4, row_area.y, 1, 1),
+            Rect::new(start_x + text_width.saturating_sub(1), row_area.y, 1, 1),
+        )
     }
 
     /// Render a single settings field line.
@@ -721,10 +789,13 @@ impl SettingsDialog {
         } else {
             let label_style = Style::default().fg(muted);
             let value_style = Style::default().fg(Color::White);
+            let arrow_style = Style::default().fg(muted);
             Line::from(vec![
                 Span::styled(String::from("  "), Style::default()),
                 Span::styled(format!("{label}: "), label_style),
+                Span::styled(String::from("◀ "), arrow_style),
                 Span::styled(value.to_string(), value_style),
+                Span::styled(String::from(" ▶"), arrow_style),
             ])
         }
     }
@@ -759,6 +830,24 @@ mod tests {
     use crate::dialog::test_helpers::color_of_text;
     use ratatui::{Terminal, backend::TestBackend};
 
+    fn click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }
+    }
+
+    fn scroll_down() -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }
+    }
+
     #[test]
     fn render_uses_dim_and_muted_for_secondary_text() {
         let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
@@ -790,7 +879,7 @@ mod tests {
         let backend = terminal.backend();
         assert_eq!(color_of_text(backend, "Color: "), Some(muted));
         assert_eq!(color_of_text(backend, "Speed: "), Some(dim));
-        assert_eq!(color_of_text(backend, " nav  "), Some(muted));
+        assert_eq!(color_of_text(backend, " save"), Some(muted));
         assert_eq!(color_of_text(backend, "Cyan"), Some(Color::White));
     }
 
@@ -878,5 +967,52 @@ mod tests {
         dialog.prev_field();
 
         assert_eq!(dialog.selected_field, SettingsField::TimerDuration);
+    }
+
+    #[test]
+    fn clicking_a_settings_arrow_selects_and_changes_that_field() {
+        let mut dialog = dialog_at(SettingsField::Font);
+        dialog.visible = true;
+        let area = Rect::new(0, 0, 80, 30);
+        let areas = settings_areas(area, SettingsDialog::section_layout().len() as u16);
+        let row_index = SettingsDialog::section_layout()
+            .iter()
+            .position(|row| matches!(row, RowKind::Field(SettingsField::Color)))
+            .unwrap() as u16;
+        let row_area = Rect::new(
+            areas.content_area.x,
+            areas.content_area.y + row_index,
+            areas.content_area.width,
+            1,
+        );
+        let (_, right) = dialog.field_arrow_areas(SettingsField::Color, row_area);
+
+        let key = dialog.handle_mouse(click(right.x, right.y), area);
+
+        assert_eq!(dialog.selected_field, SettingsField::Color);
+        assert_eq!(key, Some(KeyCode::Right));
+    }
+
+    #[test]
+    fn clicking_save_returns_enter() {
+        let mut dialog = dialog_at(SettingsField::Font);
+        dialog.visible = true;
+        let area = Rect::new(0, 0, 80, 30);
+        let areas = settings_areas(area, SettingsDialog::section_layout().len() as u16);
+        let buttons = settings_footer_buttons(areas.help_area);
+
+        let key = dialog.handle_mouse(click(buttons[0].area.x, buttons[0].area.y), area);
+
+        assert_eq!(key, Some(KeyCode::Enter));
+    }
+
+    #[test]
+    fn settings_wheel_moves_selection_without_wrapping() {
+        let mut dialog = dialog_at(SettingsField::Font);
+        let area = Rect::new(0, 0, 80, 30);
+
+        dialog.handle_mouse(scroll_down(), area);
+
+        assert_eq!(dialog.selected_field, SettingsField::Color);
     }
 }

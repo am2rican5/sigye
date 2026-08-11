@@ -1,5 +1,6 @@
 //! Shared rendering helpers for display modes.
 
+use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     layout::{Position, Rect},
@@ -10,6 +11,116 @@ use sigye_core::{AnimationSpeed, AnimationStyle, ColorTheme, apply_animation, is
 use sigye_fonts::Font;
 
 use crate::context::RenderContext;
+
+const FOOTER_GAP: u16 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FooterAction {
+    pub key_code: KeyCode,
+    pub key_label: &'static str,
+    pub label: &'static str,
+}
+
+impl FooterAction {
+    pub const fn new(key_code: KeyCode, key_label: &'static str, label: &'static str) -> Self {
+        Self {
+            key_code,
+            key_label,
+            label,
+        }
+    }
+
+    fn width(self) -> u16 {
+        (self.key_label.chars().count() + self.label.chars().count() + 3) as u16
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FooterButton {
+    pub area: Rect,
+    pub action: FooterAction,
+}
+
+fn footer_rows(width: u16, actions: &[FooterAction]) -> Vec<Vec<FooterAction>> {
+    let mut rows: Vec<Vec<FooterAction>> = Vec::new();
+    for &action in actions {
+        let action_width = action.width().min(width);
+        let fits = rows.last().is_some_and(|row| {
+            let used = row.iter().map(|item| item.width()).sum::<u16>()
+                + FOOTER_GAP * row.len().saturating_sub(1) as u16;
+            used + FOOTER_GAP + action_width <= width
+        });
+        if fits {
+            rows.last_mut().expect("row exists").push(action);
+        } else {
+            rows.push(vec![action]);
+        }
+    }
+    rows
+}
+
+pub fn footer_height(width: u16, actions: &[FooterAction]) -> u16 {
+    footer_rows(width, actions).len() as u16
+}
+
+pub fn footer_layout(area: Rect, actions: &[FooterAction]) -> Vec<FooterButton> {
+    let rows = footer_rows(area.width, actions);
+    let start_y = area.y + area.height.saturating_sub(rows.len() as u16);
+    let mut buttons = Vec::with_capacity(actions.len());
+
+    for (row_index, row) in rows.into_iter().enumerate() {
+        let row_width = row.iter().map(|action| action.width()).sum::<u16>()
+            + FOOTER_GAP * row.len().saturating_sub(1) as u16;
+        let mut x = area.x + area.width.saturating_sub(row_width) / 2;
+        for action in row {
+            let width = action.width().min(area.right().saturating_sub(x));
+            buttons.push(FooterButton {
+                area: Rect::new(x, start_y + row_index as u16, width, 1),
+                action,
+            });
+            x = x.saturating_add(width + FOOTER_GAP);
+        }
+    }
+    buttons
+}
+
+pub fn footer_action_at(buttons: &[FooterButton], column: u16, row: u16) -> Option<KeyCode> {
+    buttons
+        .iter()
+        .find(|button| button.area.contains((column, row).into()))
+        .map(|button| button.action.key_code)
+}
+
+pub fn with_global_footer_actions(actions: &[FooterAction]) -> Vec<FooterAction> {
+    const GLOBAL: [FooterAction; 4] = [
+        FooterAction::new(KeyCode::Char('M'), "M", "mode"),
+        FooterAction::new(KeyCode::Char('s'), "s", "settings"),
+        FooterAction::new(KeyCode::Char('?'), "?", "help"),
+        FooterAction::new(KeyCode::Char('q'), "q", "quit"),
+    ];
+
+    actions
+        .iter()
+        .copied()
+        .filter(|action| {
+            !GLOBAL
+                .iter()
+                .any(|global| global.key_code == action.key_code)
+        })
+        .chain(GLOBAL)
+        .collect()
+}
+
+pub fn render_footer(frame: &mut Frame, area: Rect, ctx: &RenderContext, actions: &[FooterAction]) {
+    if ctx.screensaver_mode {
+        return;
+    }
+
+    for button in footer_layout(area, actions) {
+        let text = format!("[{}] {}", button.action.key_label, button.action.label);
+        render_centered_text(frame, button.area, &text, ctx.dim_color());
+    }
+}
 
 /// Parameters for rendering ASCII art text to the frame buffer.
 pub struct AsciiTextParams {
@@ -167,21 +278,92 @@ pub fn render_progress_bar(progress: f64, width: u16, accent: Color) -> Line<'st
     ])
 }
 
-/// Render mode key hints unless screensaver mode is hiding UI chrome.
-pub fn render_key_hints(
-    frame: &mut Frame,
-    area: Rect,
-    ctx: &RenderContext,
-    hints: &[(&str, &str)],
-) {
-    if ctx.screensaver_mode {
-        return;
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+    use ratatui::{Terminal, backend::TestBackend};
+    use sigye_config::Config;
+    use sigye_fonts::FontRegistry;
+
+    use super::*;
+
+    #[test]
+    fn footer_layout_wraps_actions_and_preserves_click_targets() {
+        let actions = [
+            FooterAction::new(KeyCode::Char('m'), "m", "mode"),
+            FooterAction::new(KeyCode::Char('s'), "s", "settings"),
+        ];
+        let area = Rect::new(0, 5, 18, 2);
+
+        let buttons = footer_layout(area, &actions);
+
+        assert_eq!(footer_height(area.width, &actions), 2);
+        assert_eq!(buttons.len(), 2);
+        assert_eq!(buttons[0].area, Rect::new(5, 5, 8, 1));
+        assert_eq!(buttons[1].area, Rect::new(3, 6, 12, 1));
+        assert_eq!(footer_action_at(&buttons, 5, 5), Some(KeyCode::Char('m')));
+        assert_eq!(footer_action_at(&buttons, 14, 6), Some(KeyCode::Char('s')));
+        assert_eq!(footer_action_at(&buttons, 0, 5), None);
     }
 
-    let hint_str = hints
-        .iter()
-        .map(|(key, value)| format!("[{key}] {value}"))
-        .collect::<Vec<_>>()
-        .join("  ");
-    render_centered_text(frame, area, &hint_str, ctx.dim_color());
+    #[test]
+    fn global_footer_actions_are_appended_once() {
+        let actions = with_global_footer_actions(&[
+            FooterAction::new(KeyCode::Char('s'), "s", "settings"),
+            FooterAction::new(KeyCode::Char('r'), "r", "reset"),
+        ]);
+
+        assert_eq!(
+            actions
+                .iter()
+                .map(|action| action.key_code)
+                .collect::<Vec<_>>(),
+            vec![
+                KeyCode::Char('r'),
+                KeyCode::Char('M'),
+                KeyCode::Char('s'),
+                KeyCode::Char('?'),
+                KeyCode::Char('q'),
+            ]
+        );
+    }
+
+    #[test]
+    fn footer_renders_the_clickable_action_text() {
+        let mut terminal = Terminal::new(TestBackend::new(30, 2)).unwrap();
+        let config = Config::default();
+        let ctx = RenderContext {
+            time_format: config.time_format,
+            color_theme: config.color_theme,
+            animation_style: config.animation_style,
+            animation_speed: config.animation_speed,
+            colon_blink: config.colon_blink,
+            show_seconds: config.show_seconds,
+            background_style: config.background_style,
+            current_font: config.font_name.clone(),
+            font_registry: FontRegistry::new(),
+            on_complete_command: config.on_complete.clone(),
+            config,
+            animation_start: std::time::Instant::now(),
+            flash_intensity: 0.0,
+            flash_start: None,
+            screensaver_mode: false,
+            desktop_notifications: false,
+            sunrise_sunset: None,
+        };
+        let actions = [FooterAction::new(KeyCode::Char('r'), "r", "reset")];
+
+        terminal
+            .draw(|frame| render_footer(frame, frame.area(), &ctx, &actions))
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("[r] reset"));
+    }
 }

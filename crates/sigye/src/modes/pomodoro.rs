@@ -155,6 +155,8 @@ impl Mode for PomodoroMode {
 
     fn render(&self, frame: &mut Frame, ctx: &RenderContext) {
         let area = frame.area();
+        let actions = self.all_footer_actions();
+        let footer_height = render::footer_height(area.width, &actions);
         let font = ctx.font_registry.get_or_default(&ctx.current_font);
         let font_height = font.height as u16;
 
@@ -166,7 +168,7 @@ impl Mode for PomodoroMode {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Fill(1),
-            Constraint::Length(1),
+            Constraint::Length(footer_height),
         ])
         .split(area);
 
@@ -212,7 +214,7 @@ impl Mode for PomodoroMode {
         let bar_widget = Paragraph::new(bar).alignment(Alignment::Center);
         frame.render_widget(bar_widget, chunks[4]);
 
-        render::render_key_hints(frame, chunks[6], ctx, &self.key_hints());
+        render::render_footer(frame, chunks[6], ctx, &actions);
     }
 
     fn handle_key(&mut self, key: KeyEvent, ctx: &mut RenderContext) -> bool {
@@ -237,12 +239,11 @@ impl Mode for PomodoroMode {
         }
     }
 
-    fn key_hints(&self) -> Vec<(&'static str, &'static str)> {
+    fn footer_actions(&self) -> Vec<render::FooterAction> {
         vec![
-            ("Space", "start/pause"),
-            ("r", "reset"),
-            ("n", "skip"),
-            ("?", "help"),
+            render::FooterAction::new(KeyCode::Char(' '), "Space", "start/pause"),
+            render::FooterAction::new(KeyCode::Char('r'), "r", "reset"),
+            render::FooterAction::new(KeyCode::Char('n'), "n", "skip"),
         ]
     }
 

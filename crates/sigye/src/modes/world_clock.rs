@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
@@ -69,14 +69,20 @@ impl Mode for WorldClockMode {
 
     fn render(&self, frame: &mut Frame, ctx: &RenderContext) {
         let area = frame.area();
+        let actions = self.all_footer_actions();
+        let footer_height = render::footer_height(area.width, &actions);
+        let root =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(footer_height)]).split(area);
+        let content_area = root[0];
 
         if self.entries.is_empty() {
             render::render_centered_text(
                 frame,
-                area,
+                content_area,
                 "No world clock zones configured",
                 ctx.dim_color(),
             );
+            render::render_footer(frame, root[1], ctx, &actions);
             return;
         }
 
@@ -87,15 +93,14 @@ impl Mode for WorldClockMode {
         let entry_height = 1 + font_height;
         let n = self.entries.len() as u16;
 
-        // Build constraints: fill top, then entries, fill bottom, hints
+        // Build constraints: fill top, then entries, fill bottom
         let mut constraints = vec![Constraint::Fill(1)];
         for _ in 0..n {
             constraints.push(Constraint::Length(entry_height));
         }
         constraints.push(Constraint::Fill(1));
-        constraints.push(Constraint::Length(1));
 
-        let chunks = Layout::vertical(constraints).split(area);
+        let chunks = Layout::vertical(constraints).split(content_area);
 
         let now_utc = Utc::now();
 
@@ -128,20 +133,17 @@ impl Mode for WorldClockMode {
             render::render_ascii_text(frame, entry_chunks[1], font, &time_str, &params);
         }
 
-        let hints_area = chunks[chunks.len() - 1];
-        render::render_key_hints(frame, hints_area, ctx, &self.key_hints());
+        render::render_footer(frame, root[1], ctx, &actions);
     }
 
     fn handle_key(&mut self, _key: KeyEvent, _ctx: &mut RenderContext) -> bool {
         false
     }
 
-    fn key_hints(&self) -> Vec<(&'static str, &'static str)> {
+    fn footer_actions(&self) -> Vec<render::FooterAction> {
         vec![
-            ("t", "12/24h"),
-            ("c", "color"),
-            ("s", "settings"),
-            ("?", "help"),
+            render::FooterAction::new(KeyCode::Char('t'), "t", "12/24h"),
+            render::FooterAction::new(KeyCode::Char('c'), "c", "color"),
         ]
     }
 

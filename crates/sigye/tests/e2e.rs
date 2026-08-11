@@ -212,7 +212,7 @@ mod tui {
     }
 
     fn click(writer: &mut impl Write, column: u16, row: u16) {
-        write!(writer, "\x1b[<0;{column};{row}M").expect("send mouse click");
+        write!(writer, "\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m").expect("send mouse click");
         writer.flush().expect("flush mouse click");
     }
 
@@ -324,6 +324,10 @@ mod tui {
             .windows(8)
             .position(|bytes| bytes == b"\x1b[?1000h")
             .expect("enable mouse capture");
+        assert!(!output.windows(8).any(|bytes| bytes == b"\x1b[?1002h"));
+        assert!(!output.windows(8).any(|bytes| bytes == b"\x1b[?1003h"));
+        assert!(!output.windows(8).any(|bytes| bytes == b"\x1b[?1015h"));
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1006h"));
         let render = output
             .windows(b"[s]".len())
             .position(|bytes| bytes == b"[s]")

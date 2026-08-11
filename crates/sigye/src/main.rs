@@ -14,9 +14,11 @@ mod weather;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+#[cfg(not(unix))]
+use crossterm::event::EnableMouseCapture;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    self, DisableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
+    MouseEvent, MouseEventKind,
 };
 use ratatui::{
     DefaultTerminal, Frame,
@@ -42,6 +44,20 @@ use settings::SettingsDialog;
 use sigye_background::BackgroundState;
 use system_metrics::SystemMonitor;
 use weather::WeatherMonitor;
+
+#[cfg(unix)]
+fn enable_mouse_capture() -> std::io::Result<()> {
+    // Crossterm's command also enables motion tracking, which floods the input queue.
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::style::Print("\x1b[?1000h\x1b[?1006h")
+    )
+}
+
+#[cfg(not(unix))]
+fn enable_mouse_capture() -> std::io::Result<()> {
+    crossterm::execute!(std::io::stdout(), EnableMouseCapture)
+}
 
 fn footer_key_at(
     mode: &dyn Mode,
@@ -74,7 +90,7 @@ fn root_mouse_action(
     area: ratatui::layout::Rect,
     mouse: MouseEvent,
 ) -> RootMouseAction {
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+    if mouse.kind != MouseEventKind::Up(MouseButton::Left) {
         return RootMouseAction::None;
     }
     if screensaver {
@@ -180,7 +196,7 @@ fn main() -> color_eyre::Result<()> {
         let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
         previous_hook(panic_info);
     }));
-    if let Err(error) = crossterm::execute!(std::io::stdout(), EnableMouseCapture) {
+    if let Err(error) = enable_mouse_capture() {
         ratatui::restore();
         return Err(error.into());
     }
@@ -606,7 +622,7 @@ impl App {
 
     fn on_mouse_event(&mut self, mouse: MouseEvent) {
         if self.show_help {
-            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
                 self.show_help = false;
             }
             return;
@@ -1013,6 +1029,13 @@ mod mouse_tests {
         }
     }
 
+    fn release(button: MouseButton) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Up(button),
+            ..click(button)
+        }
+    }
+
     #[test]
     fn footer_click_resolves_to_the_existing_key_action() {
         let mode = TimerMode::new(5);
@@ -1028,16 +1051,34 @@ mod mouse_tests {
         let area = ratatui::layout::Rect::new(0, 0, 80, 20);
 
         assert_eq!(
-            root_mouse_action(&mode, true, false, area, click(MouseButton::Left)),
+            root_mouse_action(&mode, true, false, area, release(MouseButton::Left)),
             RootMouseAction::Quit
         );
         assert_eq!(
-            root_mouse_action(&mode, false, true, area, click(MouseButton::Left)),
+            root_mouse_action(&mode, false, true, area, release(MouseButton::Left)),
             RootMouseAction::Key(KeyCode::Char('z'))
         );
         assert_eq!(
-            root_mouse_action(&mode, true, false, area, click(MouseButton::Right)),
+            root_mouse_action(&mode, true, false, area, release(MouseButton::Right)),
             RootMouseAction::None
+        );
+    }
+
+    #[test]
+    fn root_clicks_trigger_on_button_release() {
+        let mode = ClockMode::new();
+        let area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        let mut mouse = click(MouseButton::Left);
+
+        assert_eq!(
+            root_mouse_action(&mode, true, false, area, mouse),
+            RootMouseAction::None
+        );
+
+        mouse.kind = MouseEventKind::Up(MouseButton::Left);
+        assert_eq!(
+            root_mouse_action(&mode, true, false, area, mouse),
+            RootMouseAction::Quit
         );
     }
 }

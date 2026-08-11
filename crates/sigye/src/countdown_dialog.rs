@@ -205,7 +205,7 @@ impl CountdownDialog {
                 _ => {}
             }
         }
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
             match self.view {
                 View::List => {
                     let areas = countdown_list_areas(area, self.events.len());
@@ -699,7 +699,7 @@ mod tests {
 
     fn click(column: u16, row: u16) -> MouseEvent {
         MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
+            kind: MouseEventKind::Up(MouseButton::Left),
             column,
             row,
             modifiers: KeyModifiers::NONE,

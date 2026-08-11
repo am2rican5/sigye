@@ -29,5 +29,8 @@ notify-rust.workspace = true
 chrono-tz.workspace = true
 arboard.workspace = true
 
+[target.'cfg(unix)'.dev-dependencies]
+portable-pty = "0.9"
+
 [lints]
 workspace = true

@@ -106,7 +106,7 @@ fn root_mouse_action(
 
 /// A beautiful terminal clock with ASCII art fonts, animations, and backgrounds.
 #[derive(Parser)]
-#[command(name = "sigye", version, about)]
+#[command(name = "sigye", bin_name = "sigye", version, about)]
 struct Cli {
     /// Start in screensaver mode (fullscreen, no UI chrome)
     #[arg(long)]

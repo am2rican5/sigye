@@ -279,13 +279,32 @@ mod tui {
 
         writer.write_all(b"\x1b").expect("close settings");
         writer.flush().expect("flush close key");
-        match receiver.recv_timeout(Duration::from_secs(5)) {
-            Ok(chunk) => output.extend(chunk),
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("settings did not close within five seconds");
+        // Crossterm only treats a lone ESC as a key after its ESC-vs-CSI
+        // timeout (~100ms). Waiting for any one PTY chunk is not enough:
+        // the clock already emits frames while settings is still visible,
+        // and a following SGR mouse sequence starts with ESC. If that CSI
+        // arrives during the timeout, ESC may be swallowed and the help
+        // click is lost. This showed up on macOS CI runners.
+        thread::sleep(Duration::from_millis(300));
+        let mut saw_redraw = false;
+        let close_deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < close_deadline {
+            match receiver.recv_timeout(Duration::from_millis(100)) {
+                Ok(chunk) => {
+                    output.extend(chunk);
+                    saw_redraw = true;
+                }
+                Err(_) => {
+                    if saw_redraw {
+                        break;
+                    }
+                }
             }
+        }
+        if !saw_redraw {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("settings did not close within five seconds");
         }
 
         click(&mut writer, 102, 40);
@@ -293,7 +312,10 @@ mod tui {
         if !help_rendered {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("mouse click did not open help within five seconds");
+            panic!(
+                "mouse click did not open help within five seconds; output: {:?}",
+                visible_text(&output)
+            );
         }
 
         click(&mut writer, 1, 1);

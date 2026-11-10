@@ -22,7 +22,7 @@ color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 toml = "1.1"
 directories = "6.0"
-sysinfo = { version = "0.39", default-features = false, features = [
+sysinfo = { version = "0.40", default-features = false, features = [
   "network",
   "system",
 ] }

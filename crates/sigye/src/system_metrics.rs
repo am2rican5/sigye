@@ -46,8 +46,14 @@ impl SystemMonitor {
         let running = self.running.clone();
 
         thread::spawn(move || {
-            let mut sys = System::new_all();
-            let mut networks = Networks::new_with_refreshed_list();
+            // sysinfo 0.40 constructors return Result; if refresh setup
+            // fails, leave metrics at their defaults and exit the thread.
+            let Ok(mut sys) = System::new_all() else {
+                return;
+            };
+            let Ok(mut networks) = Networks::new_with_refreshed_list() else {
+                return;
+            };
             let mut max_values = MaxValues::default();
 
             // Initial refresh to get baseline
@@ -76,7 +82,7 @@ impl SystemMonitor {
                 let elapsed_secs = now.duration_since(prev_time).as_secs_f64().max(0.001);
 
                 // Calculate CPU usage (average across all cores)
-                let cpu_usage = sys.cpus().iter().map(|c| c.cpu_usage()).sum::<f32>()
+                let cpu_usage = sys.cpus().iter().map(|c| c.usage()).sum::<f32>()
                     / sys.cpus().len().max(1) as f32
                     / 100.0;
 

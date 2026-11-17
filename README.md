@@ -16,10 +16,10 @@ A feature-rich terminal clock with ASCII art fonts, animated backgrounds, and pr
 - **Day & year progress bars** — Ambient progress indicators at a glance
 - **Minimal clock view** — Press `z` to hide all secondary UI and center the clock; the preference is saved
 - **Scriptable output** — `sigye --once --format unix` for shell pipelines
-- **40+ bundled FIGlet fonts** — From classic Standard to stylish Star Wars
+- **40 bundled FIGlet fonts** — From classic Standard to stylish Star Wars
 - **18 color themes** — 7 static colors and 11 gradient palettes
 - **5 animation styles** — None, Shifting, Pulsing, Wave, and Reactive
-- **21 animated backgrounds** — Starfield, matrix rain, weather effects, cherry blossoms, twilight, and system-reactive visuals
+- **20 animated backgrounds** — Starfield, matrix rain, weather effects, cherry blossoms, twilight, and system-reactive visuals
 - **Desktop notifications** — Alerts for Pomodoro phase changes and timer completion
 - **Live weather backgrounds** — Auto-selects rain, snow, fog, or sun based on real conditions via wttr.in
 - **System-reactive backgrounds** — CPU, memory, and network metrics drive visual effects
@@ -29,7 +29,7 @@ A feature-rich terminal clock with ASCII art fonts, animated backgrounds, and pr
 - **12/24 hour format** — Toggle with a single keypress
 - **Live settings preview** — See changes in real time before saving
 - **Persistent configuration** — Settings saved automatically to TOML
-- **Custom font support** — Drop FIGlet `.flf` files into `~/.config/sigye/fonts/`
+- **Custom font support** — Drop FIGlet `.flf` files into the `fonts/` folder of the [config directory](#configuration)
 
 ## How sigye Compares
 
@@ -46,9 +46,9 @@ A feature-rich terminal clock with ASCII art fonts, animated backgrounds, and pr
 | Unix/ISO/Hex Time | Yes | -- | -- | -- | -- |
 | Clipboard Copy | Yes | -- | -- | -- | -- |
 | Scriptable Output | Yes | -- | -- | -- | -- |
-| FIGlet Fonts | 40+ | 1 | 3 | 1 | 7 |
+| FIGlet Fonts | 40 | 1 | 3 | 1 | 7 |
 | Color Themes | 18 | 8 | 256 | Basic | Basic |
-| Animated Backgrounds | 21 | -- | -- | -- | -- |
+| Animated Backgrounds | 20 | -- | -- | -- | -- |
 | Live Weather | Yes | -- | -- | -- | -- |
 | System-Reactive | Yes | -- | -- | -- | -- |
 | Desktop Notifications | Yes | -- | -- | -- | Yes* |
@@ -107,6 +107,11 @@ Options:
   --bg <NAME>            Set background (e.g., "matrix", "aurora", "weather")
   --mode <MODE>          Set display mode (clock, pomodoro, timer, stopwatch, worldclock, countdown)
   --tz <LABEL=TZ>        Add world clock timezone (repeatable)
+  --on-complete <CMD>    Shell command to run on timer/pomodoro completion
+  --start                Auto-start the active timer mode (pomodoro, timer, or stopwatch)
+  --pomo                 Start in pomodoro mode and auto-start
+  --sw                   Start in stopwatch mode and auto-start
+  --timer <MINS>         Set timer duration in minutes and auto-start timer mode
   --once                 Print time once and exit (no TUI)
   --format <FORMAT>      Output format for --once (human, unix, iso, hex) [default: human]
   -h, --help             Print help
@@ -127,6 +132,7 @@ sigye --screensaver --bg aurora --theme neon
 sigye --demo
 sigye --mode worldclock --tz "Seoul=Asia/Seoul" --tz "Berlin=Europe/Berlin"
 sigye --mode pomodoro --font Doom --theme fire
+sigye --timer 10 --on-complete "./notify.sh done"
 ```
 
 ## Keybindings
@@ -207,7 +213,13 @@ sigye --mode pomodoro --font Doom --theme fire
 
 ## Configuration
 
-Settings are stored at `~/.config/sigye/config.toml`:
+Settings are stored in `config.toml` in the config directory:
+
+| Platform | Config directory |
+|----------|------------------|
+| Linux | `~/.config/sigye/` (or `$XDG_CONFIG_HOME/sigye/`) |
+| macOS | `~/Library/Application Support/com.sigye.sigye/` |
+| Windows | `%APPDATA%\sigye\sigye\config\` |
 
 ```toml
 font_name = "Standard"
@@ -225,6 +237,18 @@ pomodoro_break_mins = 5
 pomodoro_long_break_mins = 15
 pomodoro_sessions_until_long = 4
 pomodoro_sound = true
+desktop_notifications = true
+timer_duration_mins = 5
+```
+
+### Hooks
+
+Optional shell commands (run with `sh -c`) fired by the timers:
+
+```toml
+on_complete = "./notify.sh done"    # Timer finished, or any Pomodoro phase change
+on_start = "./notify.sh focus"      # A Pomodoro work phase begins or resumes
+on_break = "./notify.sh break"      # A Pomodoro break begins
 ```
 
 ### World Clock
@@ -269,7 +293,7 @@ as `TODAY`.
 
 ### Custom Fonts
 
-Place FIGlet font files (`.flf`) in `~/.config/sigye/fonts/` and they will appear in the settings dialog.
+Place FIGlet font files (`.flf`) in the `fonts/` folder of the config directory above (e.g. `~/.config/sigye/fonts/` on Linux) and they will appear in the settings dialog.
 
 ## Color Themes
 

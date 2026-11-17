@@ -6,9 +6,10 @@
 #   cargo build --release
 #
 # Usage:
-#   cd assets && ./record-demos.sh         # Record all demos
-#   cd assets && ./record-demos.sh quick   # Record only the quick demo
-#   cd assets && ./record-demos.sh main    # Record only the main demo
+#   cd assets && ./record-demos.sh               # Record all demos
+#   cd assets && ./record-demos.sh main          # Record only the main demo
+#   cd assets && ./record-demos.sh quick         # Record only the quick demo
+#   cd assets && ./record-demos.sh screensaver   # Record only the screensaver demo
 
 set -e
 

@@ -217,6 +217,37 @@ mod tui {
     }
 
     #[test]
+    fn broken_config_is_reported_before_the_tui_starts_and_left_untouched() {
+        let temp = TempDir::new();
+        let contents = "pomodoro_work_mins = \"twenty\"\n";
+        // Linux reads $XDG_CONFIG_HOME/sigye; macOS reads ~/Library/Application Support.
+        let paths = [
+            temp.0.join("sigye/config.toml"),
+            temp.0
+                .join("Library/Application Support/com.sigye.sigye/config.toml"),
+        ];
+        for path in &paths {
+            fs::create_dir_all(path.parent().unwrap()).expect("create config directory");
+            fs::write(path, contents).expect("write broken config");
+        }
+
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_sigye"))
+            .env("HOME", &temp.0)
+            .env("XDG_CONFIG_HOME", &temp.0)
+            .output()
+            .expect("run sigye");
+
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty(), "the TUI must not start");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Invalid config file"), "{stderr}");
+        assert!(stderr.contains("pomodoro_work_mins"), "{stderr}");
+        for path in &paths {
+            assert_eq!(fs::read_to_string(path).unwrap(), contents);
+        }
+    }
+
+    #[test]
     fn tui_mouse_controls_footer_and_restores_terminal() {
         let temp = TempDir::new();
         let temp_path = temp.0.clone();

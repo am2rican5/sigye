@@ -1,7 +1,8 @@
 //! Configuration management for the sigye clock application.
 
 use std::fs;
-use std::path::PathBuf;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -204,39 +205,39 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Load configuration from file, or return defaults if not found.
-    pub fn load() -> Self {
-        let config_path = Self::config_file_path();
-
-        if config_path.exists() {
-            match fs::read_to_string(&config_path) {
-                Ok(contents) => match toml::from_str(&contents) {
-                    Ok(config) => return config,
-                    Err(e) => {
-                        eprintln!("Warning: Failed to parse config file: {e}");
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Warning: Failed to read config file: {e}");
-                }
-            }
-        }
-
-        Self::default()
+    /// Load the configuration file, or return defaults if there is none.
+    ///
+    /// A file that exists but cannot be read or parsed is an error rather than a
+    /// silent fallback to defaults: the app saves its config on several actions,
+    /// and saving defaults would overwrite the user's file.
+    pub fn load() -> Result<Self, ConfigError> {
+        Self::load_from(&Self::config_file_path())
     }
 
-    /// Save configuration to file.
-    pub fn save(&self) -> Result<(), ConfigError> {
-        let config_dir = Self::config_dir();
-        fs::create_dir_all(&config_dir).map_err(|e| ConfigError::Io(e.to_string()))?;
+    /// Load configuration from `path`, or return defaults if it does not exist.
+    pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
+        let contents = match fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => return Err(ConfigError::Io(format!("{}: {e}", path.display()))),
+        };
+        toml::from_str(&contents)
+            .map_err(|e| ConfigError::Parse(format!("{}: {e}", path.display())))
+    }
 
-        let config_path = Self::config_file_path();
+    /// Save configuration to the config file.
+    pub fn save(&self) -> Result<(), ConfigError> {
+        self.save_to(&Self::config_file_path())
+    }
+
+    /// Save configuration to `path`, creating its directory if needed.
+    pub fn save_to(&self, path: &Path) -> Result<(), ConfigError> {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).map_err(|e| ConfigError::Io(e.to_string()))?;
+        }
         let contents =
             toml::to_string_pretty(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
-
-        fs::write(&config_path, contents).map_err(|e| ConfigError::Io(e.to_string()))?;
-
-        Ok(())
+        fs::write(path, contents).map_err(|e| ConfigError::Io(e.to_string()))
     }
 
     /// Get the configuration directory path.
@@ -271,6 +272,7 @@ fn dirs_fallback() -> PathBuf {
 #[derive(Debug)]
 pub enum ConfigError {
     Io(String),
+    Parse(String),
     Serialize(String),
 }
 
@@ -278,6 +280,7 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConfigError::Io(msg) => write!(f, "IO error: {msg}"),
+            ConfigError::Parse(msg) => write!(f, "Invalid config file {msg}"),
             ConfigError::Serialize(msg) => write!(f, "Serialization error: {msg}"),
         }
     }
@@ -294,6 +297,26 @@ mod tests {
         let config: Config = toml::from_str("").unwrap();
 
         assert!(!config.minimal_mode);
+    }
+
+    #[test]
+    fn load_from_returns_defaults_for_a_missing_file_and_errors_on_a_bad_one() {
+        let dir = std::env::temp_dir().join(format!("sigye-config-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        let missing = Config::load_from(&path).unwrap();
+        assert_eq!(missing.font_name, "Standard");
+
+        fs::write(&path, "font_name = \"Doom\"\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().font_name, "Doom");
+
+        fs::write(&path, "pomodoro_work_mins = \"twenty\"\n").unwrap();
+        let error = Config::load_from(&path).unwrap_err().to_string();
+        assert!(error.contains("config.toml"), "{error}");
+        assert!(error.contains("pomodoro_work_mins"), "{error}");
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

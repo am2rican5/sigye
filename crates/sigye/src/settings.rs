@@ -11,6 +11,7 @@ use ratatui::{
 use sigye_core::{AnimationSpeed, AnimationStyle, BackgroundStyle, ColorTheme, TimeFormat};
 
 use crate::dialog::{centered_rect, dialog_block};
+use crate::modes::timer;
 use crate::render::{FooterAction, FooterButton, footer_action_at, footer_layout};
 
 /// The settings field currently being edited.
@@ -40,16 +41,19 @@ const POMODORO_BREAK_MINS: &[u32] = &[3, 5, 10, 15];
 /// Common Pomodoro long break durations cycled through in the settings dialog (minutes).
 const POMODORO_LONG_BREAK_MINS: &[u32] = &[10, 15, 20, 30];
 
-/// Step `current` forward (`delta = 1`) or backward (`delta = -1`) through `values`
-/// with wraparound. If `current` isn't in `values`, fall back to `default`.
-fn cycle_value(values: &[u32], current: u32, delta: i32, default: u32) -> u32 {
-    match values.iter().position(|&v| v == current) {
-        Some(idx) => {
-            let len = values.len() as i32;
-            let next = (idx as i32 + delta).rem_euclid(len) as usize;
-            values[next]
-        }
-        None => default,
+/// Step to the next value in the ascending list `values` above `current` (or below
+/// it when `forward` is false), wrapping around at either end. A `current` that is
+/// not in the list, such as one set in the config file, steps to its neighbor.
+fn step_value(values: &[u32], current: u32, forward: bool) -> u32 {
+    if forward {
+        values
+            .iter()
+            .copied()
+            .find(|&v| v > current)
+            .unwrap_or(values[0])
+    } else {
+        let below = values.iter().copied().rev().find(|&v| v < current);
+        below.unwrap_or(values[values.len() - 1])
     }
 }
 
@@ -449,22 +453,18 @@ impl SettingsDialog {
                 self.colon_blink = !self.colon_blink;
             }
             SettingsField::PomodoroWork => {
-                // Cycle through common work durations: 15, 20, 25, 30, 45, 50, 60
                 self.pomodoro_work_mins =
-                    cycle_value(POMODORO_WORK_MINS, self.pomodoro_work_mins, 1, 15);
+                    step_value(POMODORO_WORK_MINS, self.pomodoro_work_mins, true);
             }
             SettingsField::PomodoroBreak => {
-                // Cycle through common break durations: 3, 5, 10, 15
                 self.pomodoro_break_mins =
-                    cycle_value(POMODORO_BREAK_MINS, self.pomodoro_break_mins, 1, 3);
+                    step_value(POMODORO_BREAK_MINS, self.pomodoro_break_mins, true);
             }
             SettingsField::PomodoroLongBreak => {
-                // Cycle through common long break durations: 10, 15, 20, 30
-                self.pomodoro_long_break_mins = cycle_value(
+                self.pomodoro_long_break_mins = step_value(
                     POMODORO_LONG_BREAK_MINS,
                     self.pomodoro_long_break_mins,
-                    1,
-                    10,
+                    true,
                 );
             }
             SettingsField::PomodoroSound => {
@@ -474,7 +474,7 @@ impl SettingsDialog {
                 self.desktop_notifications = !self.desktop_notifications;
             }
             SettingsField::TimerDuration => {
-                self.timer_duration_mins = (self.timer_duration_mins + 1).min(99);
+                self.timer_duration_mins = timer::clamp_mins(self.timer_duration_mins + 1);
             }
         }
     }
@@ -513,22 +513,18 @@ impl SettingsDialog {
                 self.colon_blink = !self.colon_blink;
             }
             SettingsField::PomodoroWork => {
-                // Cycle through common work durations (reverse): 60, 50, 45, 30, 25, 20, 15
                 self.pomodoro_work_mins =
-                    cycle_value(POMODORO_WORK_MINS, self.pomodoro_work_mins, -1, 25);
+                    step_value(POMODORO_WORK_MINS, self.pomodoro_work_mins, false);
             }
             SettingsField::PomodoroBreak => {
-                // Cycle through common break durations (reverse): 15, 10, 5, 3
                 self.pomodoro_break_mins =
-                    cycle_value(POMODORO_BREAK_MINS, self.pomodoro_break_mins, -1, 5);
+                    step_value(POMODORO_BREAK_MINS, self.pomodoro_break_mins, false);
             }
             SettingsField::PomodoroLongBreak => {
-                // Cycle through common long break durations (reverse): 30, 20, 15, 10
-                self.pomodoro_long_break_mins = cycle_value(
+                self.pomodoro_long_break_mins = step_value(
                     POMODORO_LONG_BREAK_MINS,
                     self.pomodoro_long_break_mins,
-                    -1,
-                    15,
+                    false,
                 );
             }
             SettingsField::PomodoroSound => {
@@ -538,7 +534,8 @@ impl SettingsDialog {
                 self.desktop_notifications = !self.desktop_notifications;
             }
             SettingsField::TimerDuration => {
-                self.timer_duration_mins = (self.timer_duration_mins.saturating_sub(1)).max(1);
+                self.timer_duration_mins =
+                    timer::clamp_mins(self.timer_duration_mins.saturating_sub(1));
             }
         }
     }
@@ -892,6 +889,20 @@ mod tests {
         terminal
             .draw(|frame| dialog.render(frame, frame.area(), Color::Red, Color::Gray, Color::Gray))
             .unwrap();
+    }
+
+    #[test]
+    fn stepping_moves_to_the_neighboring_preset_and_wraps() {
+        let presets = POMODORO_WORK_MINS;
+        assert_eq!(step_value(presets, 25, true), 30);
+        assert_eq!(step_value(presets, 25, false), 20);
+        assert_eq!(step_value(presets, 60, true), 15);
+        assert_eq!(step_value(presets, 15, false), 60);
+        // A value set in the config file steps to its neighbors, not a fixed default.
+        assert_eq!(step_value(presets, 40, true), 45);
+        assert_eq!(step_value(presets, 40, false), 30);
+        assert_eq!(step_value(presets, 90, true), 15);
+        assert_eq!(step_value(presets, 90, false), 60);
     }
 
     fn dialog_at(field: SettingsField) -> SettingsDialog {

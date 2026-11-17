@@ -1,5 +1,7 @@
 //! Shared rendering context passed to display modes.
 
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use ratatui::style::Color;
@@ -19,6 +21,8 @@ pub struct RenderContext {
     pub current_font: String,
     pub font_registry: FontRegistry,
     pub config: Config,
+    /// Where `save_config` writes `config`.
+    pub config_path: PathBuf,
     pub animation_start: Instant,
     pub flash_intensity: f32,
     pub flash_start: Option<Instant>,
@@ -69,6 +73,11 @@ impl RenderContext {
         }
     }
 
+    /// Save `config` to `config_path`.
+    pub fn save_config(&self) -> Result<(), sigye_config::ConfigError> {
+        self.config.save_to(&self.config_path)
+    }
+
     /// Ring terminal bell if sound is enabled.
     pub fn ring_bell(&self) {
         if self.config.pomodoro_sound {
@@ -84,16 +93,9 @@ impl RenderContext {
     /// Run an arbitrary shell command in a background thread (for lifecycle hooks).
     pub fn run_command(&self, cmd: &Option<String>) {
         if let Some(cmd) = cmd {
-            std::thread::spawn({
-                let cmd = cmd.clone();
-                move || {
-                    // Wait for the command so the finished child is reaped, not left a zombie.
-                    let _ = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(&cmd)
-                        .status();
-                }
-            });
+            let mut command = hook_command(cmd);
+            // Wait for the command so the finished child is reaped, not left a zombie.
+            std::thread::spawn(move || command.status());
         }
     }
 
@@ -108,7 +110,8 @@ impl RenderContext {
     }
 
     /// A context built from the default config, with bell and desktop notifications
-    /// off so tests can run timers to completion quietly.
+    /// off so tests can run timers to completion quietly, and saves going to a
+    /// temporary file instead of the user's config.
     #[cfg(test)]
     pub fn for_test() -> Self {
         let config = Config {
@@ -128,6 +131,7 @@ impl RenderContext {
             font_registry: FontRegistry::new(),
             on_complete_command: None,
             config,
+            config_path: test_config_path(),
             animation_start: Instant::now(),
             flash_intensity: 0.0,
             flash_start: None,
@@ -135,4 +139,54 @@ impl RenderContext {
             sunrise_sunset: None,
         }
     }
+}
+
+/// Build the shell command for a hook. Its output is discarded: anything it printed
+/// would land on top of the TUI.
+fn hook_command(cmd: &str) -> Command {
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        // `arg` would quote the string again and mangle any quotes inside it;
+        // `cmd /C` expects the hook verbatim.
+        let mut command = Command::new("cmd");
+        command.arg("/C").raw_arg(cmd);
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(cmd);
+        command
+    };
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hooks_run_in_a_shell_with_output_discarded() {
+        let out = std::env::temp_dir().join(format!("sigye-hook-{}", std::process::id()));
+        let status = hook_command(&format!("echo hidden; echo kept > '{}'", out.display()))
+            .output()
+            .unwrap();
+
+        assert!(status.status.success());
+        assert!(status.stdout.is_empty());
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "kept\n");
+        std::fs::remove_file(&out).unwrap();
+    }
+}
+
+/// A scratch path for config saves made by tests. Tests only ever write it, so
+/// concurrent runs sharing it are harmless.
+#[cfg(test)]
+pub fn test_config_path() -> PathBuf {
+    std::env::temp_dir().join("sigye-test-config.toml")
 }

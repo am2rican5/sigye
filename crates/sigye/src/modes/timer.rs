@@ -16,6 +16,17 @@ use crate::context::RenderContext;
 use crate::mode::Mode;
 use crate::render::{self, AsciiTextParams};
 
+/// Shortest timer duration allowed, in minutes.
+pub const MIN_MINS: u32 = 1;
+/// Longest timer duration allowed, in minutes.
+pub const MAX_MINS: u32 = 99;
+
+/// Clamp a timer duration to the allowed range. The settings dialog, `+`/`-`, the
+/// config file and `--timer` all go through this, so they agree on the limits.
+pub fn clamp_mins(mins: u32) -> u32 {
+    mins.clamp(MIN_MINS, MAX_MINS)
+}
+
 /// Countdown timer display mode.
 pub struct TimerMode {
     pub duration_secs: u32,
@@ -28,7 +39,7 @@ pub struct TimerMode {
 impl TimerMode {
     /// Create a new `TimerMode` with the given duration in minutes.
     pub fn new(duration_mins: u32) -> Self {
-        let secs = duration_mins * 60;
+        let secs = clamp_mins(duration_mins) * 60;
         Self {
             duration_secs: secs,
             remaining_secs: secs,
@@ -60,13 +71,12 @@ impl TimerMode {
         self.last_tick = Instant::now();
     }
 
-    /// Adjust the duration by `delta` minutes (clamped to 1–99). Saves to config.
+    /// Adjust the duration by `delta` minutes, within the allowed range. Saves to config.
     pub fn adjust_duration(&mut self, delta: i32, ctx: &mut RenderContext) {
-        let mins = (self.duration_secs / 60) as i32 + delta;
-        let mins = mins.clamp(1, 99) as u32;
+        let mins = clamp_mins((self.duration_secs / 60).saturating_add_signed(delta));
         self.duration_secs = mins * 60;
         ctx.config.timer_duration_mins = mins;
-        let _ = ctx.config.save();
+        let _ = ctx.save_config();
 
         // If not running, also update remaining
         if !self.running && !self.completed {
@@ -76,7 +86,7 @@ impl TimerMode {
 
     /// Sync duration from a config change (e.g., settings dialog).
     pub fn sync_duration(&mut self, mins: u32) {
-        self.duration_secs = mins * 60;
+        self.duration_secs = clamp_mins(mins) * 60;
         if !self.running && !self.completed {
             self.remaining_secs = self.duration_secs;
         }
@@ -88,9 +98,7 @@ impl Mode for TimerMode {
         DisplayMode::Timer
     }
 
-    fn update(&mut self, ctx: &mut RenderContext) {
-        ctx.decay_flash();
-
+    fn tick(&mut self, ctx: &mut RenderContext) {
         if !self.running || self.completed {
             return;
         }
@@ -220,13 +228,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn durations_stay_within_the_allowed_range() {
+        assert_eq!(TimerMode::new(0).duration_secs, 60);
+        assert_eq!(TimerMode::new(500).duration_secs, 99 * 60);
+
+        let mut ctx = RenderContext::for_test();
+        let mut timer = TimerMode::new(1);
+        timer.adjust_duration(-1, &mut ctx);
+        assert_eq!(timer.duration_secs, 60);
+        timer.sync_duration(120);
+        timer.adjust_duration(1, &mut ctx);
+        assert_eq!(timer.duration_secs, 99 * 60);
+        assert_eq!(ctx.config.timer_duration_mins, 99);
+    }
+
+    #[test]
     fn tick_keeps_the_fraction_of_a_second_it_did_not_consume() {
         let mut ctx = RenderContext::for_test();
         let mut timer = TimerMode::new(1);
         timer.toggle();
         timer.last_tick = Instant::now() - Duration::from_millis(1900);
 
-        timer.update(&mut ctx);
+        timer.tick(&mut ctx);
 
         assert_eq!(timer.remaining_secs, 59);
         assert!(timer.last_tick.elapsed() >= Duration::from_millis(900));

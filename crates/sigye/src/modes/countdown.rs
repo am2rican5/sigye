@@ -255,8 +255,6 @@ impl Mode for CountdownMode {
     }
 
     fn update(&mut self, ctx: &mut RenderContext) {
-        ctx.decay_flash();
-
         // Keep active_index within bounds in case events list shrank.
         let n = self.events(ctx).len();
         if n == 0 {

@@ -3,7 +3,7 @@
 use std::any::Any;
 use std::time::Instant;
 
-use chrono::{Datelike, Local, Timelike};
+use chrono::{Datelike, Local, NaiveDateTime, Timelike};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -49,7 +49,7 @@ impl ClockMode {
     /// changed since the last call, if any. All three units are recorded every time,
     /// so an hour or minute change flashes once instead of being cut short by the
     /// weaker flashes of the units below it on the following frames.
-    fn tick(&mut self, hour: u32, minute: u32, second: u32) -> Option<f32> {
+    fn record_time(&mut self, hour: u32, minute: u32, second: u32) -> Option<f32> {
         let intensity = if hour != self.last_hour {
             Some(1.0)
         } else if minute != self.last_minute {
@@ -66,10 +66,9 @@ impl ClockMode {
     /// Detect time changes and trigger flash effects with appropriate intensity.
     fn update_flash(&mut self, ctx: &mut RenderContext) {
         let now = Local::now();
-        if let Some(intensity) = self.tick(now.hour(), now.minute(), now.second()) {
+        if let Some(intensity) = self.record_time(now.hour(), now.minute(), now.second()) {
             ctx.trigger_flash(intensity);
         }
-        ctx.decay_flash();
     }
 
     /// Show a toast message for a brief duration.
@@ -87,6 +86,16 @@ impl ClockMode {
         }
         None
     }
+}
+
+/// Fraction of the current day and of the current year that has elapsed. The year
+/// counts the elapsed part of today, so it reaches 100% at midnight on New Year
+/// rather than spending all of December 31 there.
+fn day_and_year_progress(now: &NaiveDateTime) -> (f64, f64) {
+    let day = now.num_seconds_from_midnight() as f64 / 86_400.0;
+    let days_in_year = if now.date().leap_year() { 366.0 } else { 365.0 };
+    let year = (now.ordinal0() as f64 + day) / days_in_year;
+    (day, year)
 }
 
 /// Render a compact, polished progress bar directly to the buffer.
@@ -320,20 +329,7 @@ impl Mode for ClockMode {
             render_toast(frame, info_area, toast_text, ctx.color(), elapsed);
         } else {
             // Render day/year progress bars
-            let day_progress = {
-                let h = now.hour();
-                let m = now.minute();
-                let s = now.second();
-                (h * 3600 + m * 60 + s) as f64 / 86400.0
-            };
-            let year_progress = {
-                let days_in_year = if now.date_naive().leap_year() {
-                    366.0
-                } else {
-                    365.0
-                };
-                now.ordinal() as f64 / days_in_year
-            };
+            let (day_progress, year_progress) = day_and_year_progress(&now.naive_local());
 
             // Center the two bars with a gap between them
             // Each bar: "Day " (4) + bar(12) + " " (1) + "xxx%" (4) = 21 chars
@@ -377,7 +373,7 @@ impl Mode for ClockMode {
         match key.code {
             KeyCode::Char('z') => {
                 ctx.config.minimal_mode = !ctx.config.minimal_mode;
-                if let Err(e) = ctx.config.save() {
+                if let Err(e) = ctx.save_config() {
                     eprintln!("Warning: Failed to save config: {e}");
                 }
                 true
@@ -436,11 +432,22 @@ mod tests {
         let mut mode = ClockMode::new();
         (mode.last_hour, mode.last_minute, mode.last_second) = (9, 59, 59);
 
-        assert_eq!(mode.tick(10, 0, 0), Some(1.0));
-        assert_eq!(mode.tick(10, 0, 0), None);
-        assert_eq!(mode.tick(10, 1, 0), Some(0.7));
-        assert_eq!(mode.tick(10, 1, 0), None);
-        assert_eq!(mode.tick(10, 1, 1), Some(0.3));
+        assert_eq!(mode.record_time(10, 0, 0), Some(1.0));
+        assert_eq!(mode.record_time(10, 0, 0), None);
+        assert_eq!(mode.record_time(10, 1, 0), Some(0.7));
+        assert_eq!(mode.record_time(10, 1, 0), None);
+        assert_eq!(mode.record_time(10, 1, 1), Some(0.3));
+    }
+
+    #[test]
+    fn year_progress_includes_the_elapsed_part_of_today() {
+        let at = |y, m, d, h| {
+            let date = chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap();
+            day_and_year_progress(&date.and_hms_opt(h, 0, 0).unwrap())
+        };
+        assert_eq!(at(2026, 1, 1, 0), (0.0, 0.0));
+        assert_eq!(at(2026, 12, 31, 12), (0.5, 364.5 / 365.0));
+        assert_eq!(at(2028, 12, 31, 12).1, 365.5 / 366.0);
     }
 
     #[test]

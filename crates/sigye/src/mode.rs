@@ -19,8 +19,14 @@ pub trait Mode {
     /// The display mode enum variant this mode corresponds to.
     fn display_mode(&self) -> DisplayMode;
 
-    /// Update mode state (timers, counters, etc.). Called every frame.
-    fn update(&mut self, ctx: &mut RenderContext);
+    /// Advance time-based state such as countdowns and phase changes. Called every
+    /// frame for every mode, active or not, so a timer still finishes and notifies
+    /// while another mode is on screen.
+    fn tick(&mut self, _ctx: &mut RenderContext) {}
+
+    /// Update state that only matters while this mode is on screen. Called every
+    /// frame for the active mode, after every mode has ticked.
+    fn update(&mut self, _ctx: &mut RenderContext) {}
 
     /// Render the mode's UI. Called every frame after update.
     fn render(&self, frame: &mut Frame, ctx: &RenderContext);

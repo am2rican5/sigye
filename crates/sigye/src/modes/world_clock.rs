@@ -52,10 +52,6 @@ impl Mode for WorldClockMode {
         DisplayMode::WorldClock
     }
 
-    fn update(&mut self, _ctx: &mut RenderContext) {
-        // No-op: time is read fresh each frame
-    }
-
     fn render(&self, frame: &mut Frame, ctx: &RenderContext) {
         let area = frame.area();
         let actions = self.all_footer_actions();

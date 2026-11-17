@@ -38,7 +38,7 @@ use modes::clock::ClockMode;
 use modes::countdown::CountdownMode;
 use modes::pomodoro::PomodoroMode;
 use modes::stopwatch::StopwatchMode;
-use modes::timer::TimerMode;
+use modes::timer::{self, TimerMode};
 use modes::world_clock::WorldClockMode;
 use settings::SettingsDialog;
 use sigye_background::BackgroundState;
@@ -152,8 +152,13 @@ struct Cli {
     #[arg(long)]
     sw: bool,
 
-    /// Set timer duration in minutes and auto-start timer mode
-    #[arg(long = "timer", value_name = "MINS")]
+    /// Set timer duration in minutes (1-99) and auto-start timer mode
+    #[arg(
+        long = "timer",
+        value_name = "MINS",
+        value_parser = clap::value_parser!(u32)
+            .range(i64::from(timer::MIN_MINS)..=i64::from(timer::MAX_MINS)),
+    )]
     timer_mins: Option<u32>,
 
     /// Print time once and exit (no TUI)
@@ -189,6 +194,19 @@ fn main() -> color_eyre::Result<()> {
         return Ok(());
     }
 
+    // Load the config before the TUI takes over the screen, so a broken file is
+    // reported where the user can read it. Starting on defaults instead would let
+    // the next save overwrite their file.
+    let config = match Config::load() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("sigye: {error}");
+            eprintln!("Fix or remove the file; sigye did not start and left it untouched.");
+            std::process::exit(1);
+        }
+    };
+    let app = App::new_with_cli(cli, config);
+
     let terminal = ratatui::init();
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -200,7 +218,7 @@ fn main() -> color_eyre::Result<()> {
         return Err(error.into());
     }
 
-    let result = App::new_with_cli(cli).run(terminal);
+    let result = app.run(terminal);
     let mouse_restore = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result?;
@@ -245,10 +263,10 @@ pub struct App {
 }
 
 impl App {
-    /// Construct a new instance of [`App`] from the saved configuration.
-    fn new() -> Self {
-        // Load configuration
-        let config = Config::load();
+    /// Construct a new instance of [`App`] from the given configuration.
+    fn new(mut config: Config) -> Self {
+        // Keep an out-of-range duration from the config file out of the settings dialog.
+        config.timer_duration_mins = timer::clamp_mins(config.timer_duration_mins);
 
         // Initialize font registry with bundled fonts
         let mut font_registry = FontRegistry::new();
@@ -298,6 +316,7 @@ impl App {
             current_font: config.font_name.clone(),
             font_registry,
             config,
+            config_path: Config::config_file_path(),
             animation_start: Instant::now(),
             flash_intensity: 0.0,
             flash_start: None,
@@ -341,8 +360,8 @@ impl App {
     }
 
     /// Construct a new instance with CLI overrides applied.
-    fn new_with_cli(cli: Cli) -> Self {
-        let mut app = Self::new();
+    fn new_with_cli(cli: Cli, config: Config) -> Self {
+        let mut app = Self::new(config);
 
         if let Some(font_name) = cli.font {
             let fonts = app.ctx.font_registry.list_fonts();
@@ -434,7 +453,7 @@ impl App {
             let idx = app.active_mode_index;
             let mode = &mut app.modes[idx];
             if let Some(pm) = mode.as_any_mut().downcast_mut::<PomodoroMode>() {
-                pm.toggle();
+                pm.toggle(&app.ctx);
             } else if let Some(tm) = mode.as_any_mut().downcast_mut::<TimerMode>() {
                 tm.toggle();
             } else if let Some(sw) = mode.as_any_mut().downcast_mut::<StopwatchMode>() {
@@ -510,10 +529,8 @@ impl App {
             .as_ref()
             .and_then(|m| m.get_sunrise_sunset());
 
-        // Dispatch to active mode: update then render
-        let mode = &mut self.modes[self.active_mode_index];
-        mode.update(&mut self.ctx);
-        mode.render(frame, &self.ctx);
+        self.update_modes();
+        self.modes[self.active_mode_index].render(frame, &self.ctx);
 
         // Render dialogs (last visible wins) — settings, then mode picker, then countdown editor.
         let color = self.ctx.color();
@@ -534,6 +551,16 @@ impl App {
         self.render_help_overlay(frame);
     }
 
+    /// Advance every mode's clock, then the active mode's on-screen state, then the
+    /// shared flash effect, so that decays at one rate whichever mode is shown.
+    fn update_modes(&mut self) {
+        for mode in &mut self.modes {
+            mode.tick(&mut self.ctx);
+        }
+        self.modes[self.active_mode_index].update(&mut self.ctx);
+        self.ctx.decay_flash();
+    }
+
     /// Reads the crossterm events and updates the state of [`App`].
     /// Uses polling with timeout for real-time clock updates.
     fn handle_crossterm_events(&mut self) -> color_eyre::Result<()> {
@@ -550,6 +577,14 @@ impl App {
 
     /// Handles the key events and updates the state of [`App`].
     fn on_key_event(&mut self, key: KeyEvent) {
+        // Ctrl+C quits from anywhere, including dialogs and the help overlay.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c' | 'C'))
+        {
+            self.quit();
+            return;
+        }
+
         // Dialogs are modal: route to whichever is visible.
         if self.settings_dialog.visible {
             self.handle_settings_key(key);
@@ -590,8 +625,7 @@ impl App {
 
         // Global keybindings
         match (key.modifiers, key.code) {
-            (_, KeyCode::Esc | KeyCode::Char('q'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit(),
+            (_, KeyCode::Esc | KeyCode::Char('q')) => self.quit(),
             (_, KeyCode::Char('m')) => self.toggle_display_mode(),
             (_, KeyCode::Char('M')) => self.open_mode_dialog(),
             (_, KeyCode::Char('t')) => {
@@ -694,7 +728,7 @@ impl App {
             CountdownAction::Cancel => {}
             CountdownAction::Commit(events) => {
                 self.ctx.config.countdown_events = events;
-                if let Err(e) = self.ctx.config.save() {
+                if let Err(e) = self.ctx.save_config() {
                     eprintln!("Warning: Failed to save config: {e}");
                 }
             }
@@ -738,22 +772,26 @@ impl App {
         self.ctx.colon_blink = self.settings_dialog.colon_blink;
         self.ctx.show_seconds = self.settings_dialog.show_seconds;
         self.ctx.background_style = self.settings_dialog.background_style;
-        // Update pomodoro config (will take effect on next timer reset)
         self.ctx.config.pomodoro_work_mins = self.settings_dialog.pomodoro_work_mins;
         self.ctx.config.pomodoro_break_mins = self.settings_dialog.pomodoro_break_mins;
         self.ctx.config.pomodoro_long_break_mins = self.settings_dialog.pomodoro_long_break_mins;
         self.ctx.config.pomodoro_sound = self.settings_dialog.pomodoro_sound;
         self.ctx.config.desktop_notifications = self.settings_dialog.desktop_notifications;
-        // Update timer duration via downcast
-        let new_timer_mins = self.settings_dialog.timer_duration_mins;
-        self.ctx.config.timer_duration_mins = new_timer_mins;
-        for m in self.modes.iter_mut() {
-            if let Some(tm) = m.as_any_mut().downcast_mut::<TimerMode>() {
-                tm.sync_duration(new_timer_mins);
-                break;
+        self.ctx.config.timer_duration_mins = self.settings_dialog.timer_duration_mins;
+        self.sync_mode_durations();
+        self.update_background_monitors();
+    }
+
+    /// Resize idle Timer and Pomodoro countdowns to the configured durations.
+    fn sync_mode_durations(&mut self) {
+        for mode in &mut self.modes {
+            let mode = mode.as_any_mut();
+            if let Some(timer) = mode.downcast_mut::<TimerMode>() {
+                timer.sync_duration(self.ctx.config.timer_duration_mins);
+            } else if let Some(pomodoro) = mode.downcast_mut::<PomodoroMode>() {
+                pomodoro.sync_duration(&self.ctx);
             }
         }
-        self.update_background_monitors();
     }
 
     /// Open settings dialog with current settings.
@@ -790,7 +828,7 @@ impl App {
         self.ctx.config.desktop_notifications = self.settings_dialog.desktop_notifications;
         self.ctx.config.timer_duration_mins = self.settings_dialog.timer_duration_mins;
 
-        if let Err(e) = self.ctx.config.save() {
+        if let Err(e) = self.ctx.save_config() {
             eprintln!("Warning: Failed to save config: {e}");
         }
 
@@ -814,15 +852,8 @@ impl App {
         self.ctx.config.pomodoro_long_break_mins = original.pomodoro_long_break_mins;
         self.ctx.config.pomodoro_sound = original.pomodoro_sound;
         self.ctx.config.desktop_notifications = original.desktop_notifications;
-        let orig_timer_mins = original.timer_duration_mins;
-        self.ctx.config.timer_duration_mins = orig_timer_mins;
-        // Sync timer mode via downcast
-        for m in self.modes.iter_mut() {
-            if let Some(tm) = m.as_any_mut().downcast_mut::<TimerMode>() {
-                tm.sync_duration(orig_timer_mins);
-                break;
-            }
-        }
+        self.ctx.config.timer_duration_mins = original.timer_duration_mins;
+        self.sync_mode_durations();
         self.update_background_monitors();
 
         self.settings_dialog.close();
@@ -1072,5 +1103,64 @@ mod mouse_tests {
             root_mouse_action(&mode, true, false, area, mouse),
             RootMouseAction::Quit
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    fn quiet_app() -> App {
+        let mut app = App::new(Config {
+            pomodoro_sound: false,
+            desktop_notifications: false,
+            ..Config::default()
+        });
+        app.ctx.config_path = context::test_config_path();
+        app
+    }
+
+    fn mode_mut<T: 'static>(app: &mut App) -> &mut T {
+        app.modes
+            .iter_mut()
+            .find_map(|mode| mode.as_any_mut().downcast_mut::<T>())
+            .expect("mode is registered")
+    }
+
+    #[test]
+    fn ctrl_c_quits_even_with_a_dialog_or_help_open() {
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        for open in [
+            App::open_settings,
+            App::open_mode_dialog,
+            |app: &mut App| app.show_help = true,
+        ] {
+            let mut app = quiet_app();
+            app.running = true;
+            open(&mut app);
+
+            app.on_key_event(ctrl_c);
+
+            assert!(!app.running);
+        }
+    }
+
+    #[test]
+    fn a_running_timer_finishes_while_another_mode_is_shown() {
+        let mut app = quiet_app();
+        let timer = mode_mut::<TimerMode>(&mut app);
+        timer.toggle();
+        // Back-date by seconds only: on Windows `Instant` counts from boot.
+        timer.remaining_secs = 1;
+        timer.last_tick = Instant::now() - Duration::from_millis(1500);
+        app.active_mode_index = 0;
+
+        app.update_modes();
+
+        assert_eq!(app.modes[0].display_mode(), DisplayMode::Clock);
+        assert!(mode_mut::<TimerMode>(&mut app).completed);
+        assert!(app.ctx.flash_intensity > 0.0);
     }
 }

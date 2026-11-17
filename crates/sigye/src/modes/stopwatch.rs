@@ -7,7 +7,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
-    style::Color,
 };
 use sigye_core::DisplayMode;
 
@@ -78,10 +77,6 @@ impl Mode for StopwatchMode {
         DisplayMode::Stopwatch
     }
 
-    fn update(&mut self, _ctx: &mut RenderContext) {
-        // Elapsed is computed on read; no state tick needed
-    }
-
     fn render(&self, frame: &mut Frame, ctx: &RenderContext) {
         let area = frame.area();
         let actions = self.all_footer_actions();
@@ -129,12 +124,11 @@ impl Mode for StopwatchMode {
         render::render_centered_text(frame, chunks[2], &centis_str, ctx.dim_color());
 
         // Status
+        // Same labels and colors as the timer mode.
         let (status_text, status_color) = if self.running {
-            ("RUNNING", Color::Green)
-        } else if elapsed > 0 {
-            ("PAUSED", Color::Yellow)
+            ("RUNNING", ctx.color())
         } else {
-            ("STOPPED", ctx.dim_color())
+            ("(PAUSED)", ctx.dim_color())
         };
         render::render_centered_text(frame, chunks[3], status_text, status_color);
 

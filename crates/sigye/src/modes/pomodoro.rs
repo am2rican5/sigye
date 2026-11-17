@@ -22,9 +22,12 @@ pub struct PomodoroMode {
     pub remaining_secs: u32,
     pub sessions_completed: u32,
     pub total_focus_secs: u64,
-    pub work_start: Option<Instant>,
     pub last_tick: Instant,
     pub running: bool,
+    /// Whether this phase's timer has been started since the phase began or was
+    /// reset. `on_start` fires on a work phase's first start, and settings changes
+    /// resize only a phase that has not started.
+    pub started: bool,
 }
 
 impl PomodoroMode {
@@ -35,19 +38,22 @@ impl PomodoroMode {
             remaining_secs: work_mins * 60,
             sessions_completed: sessions,
             total_focus_secs: focus_mins as u64 * 60,
-            work_start: None,
             last_tick: Instant::now(),
             running: false,
+            started: false,
         }
     }
 
-    /// Toggle the timer running state.
-    pub fn toggle(&mut self) {
+    /// Start or pause the timer. The first start of a work phase runs `on_start`.
+    pub fn toggle(&mut self, ctx: &RenderContext) {
         self.running = !self.running;
         if self.running {
             self.last_tick = Instant::now();
-            if self.phase == PomodoroPhase::Work && self.work_start.is_none() {
-                self.work_start = Some(Instant::now());
+            if !self.started {
+                self.started = true;
+                if self.phase == PomodoroPhase::Work {
+                    ctx.run_command(&ctx.config.on_start);
+                }
             }
         }
     }
@@ -55,42 +61,51 @@ impl PomodoroMode {
     /// Reset the timer to the current phase's duration from config.
     pub fn reset(&mut self, ctx: &RenderContext) {
         self.running = false;
-        self.work_start = None;
+        self.started = false;
         self.remaining_secs = phase_duration_secs(self.phase, ctx);
         self.last_tick = Instant::now();
     }
 
+    /// Resize a phase that has not started yet to the configured duration, so
+    /// settings changes show up immediately like they do for the timer mode.
+    pub fn sync_duration(&mut self, ctx: &RenderContext) {
+        if !self.started {
+            self.remaining_secs = phase_duration_secs(self.phase, ctx);
+        }
+    }
+
     /// Advance to the next phase, handling session tracking and notifications.
-    pub fn transition_phase(&mut self, ctx: &mut RenderContext) {
-        // Track focus time if we were in a work phase
-        if self.phase == PomodoroPhase::Work {
-            if let Some(start) = self.work_start.take() {
-                self.total_focus_secs += start.elapsed().as_secs();
-            }
+    /// `completed` is false when the user skips a phase; a skipped work phase does
+    /// not count as a session.
+    pub fn transition_phase(&mut self, ctx: &mut RenderContext, completed: bool) {
+        let finished_work = self.phase == PomodoroPhase::Work && completed;
+        if finished_work {
             self.sessions_completed += 1;
         }
 
         // Determine next phase
-        self.phase = if self.phase == PomodoroPhase::Work {
-            let long_break_threshold = ctx.config.pomodoro_sessions_until_long;
-            if self.sessions_completed.is_multiple_of(long_break_threshold) {
-                PomodoroPhase::LongBreak
-            } else {
-                PomodoroPhase::ShortBreak
-            }
-        } else {
+        self.phase = if self.phase != PomodoroPhase::Work {
             PomodoroPhase::Work
+        } else if finished_work
+            && self
+                .sessions_completed
+                .is_multiple_of(ctx.config.pomodoro_sessions_until_long)
+        {
+            PomodoroPhase::LongBreak
+        } else {
+            PomodoroPhase::ShortBreak
         };
 
         // Set up new phase duration
         self.remaining_secs = phase_duration_secs(self.phase, ctx);
         self.running = false;
+        self.started = false;
         self.last_tick = Instant::now();
 
         // Persist session data
         ctx.config.pomodoro_sessions_completed = self.sessions_completed;
         ctx.config.pomodoro_total_focus_mins = (self.total_focus_secs / 60) as u32;
-        let _ = ctx.config.save();
+        let _ = ctx.save_config();
 
         // Trigger effects
         ctx.trigger_flash(1.0);
@@ -104,11 +119,9 @@ impl PomodoroMode {
         ctx.send_notification(title, body);
         ctx.run_on_complete();
 
-        // Lifecycle hooks
-        if self.phase == PomodoroPhase::Work {
-            ctx.run_command(&ctx.config.on_start.clone());
-        } else {
-            ctx.run_command(&ctx.config.on_break.clone());
+        // `on_start` waits for the work phase's first start; see `toggle`.
+        if self.phase.is_break() {
+            ctx.run_command(&ctx.config.on_break);
         }
     }
 }
@@ -127,9 +140,7 @@ impl Mode for PomodoroMode {
         DisplayMode::Pomodoro
     }
 
-    fn update(&mut self, ctx: &mut RenderContext) {
-        ctx.decay_flash();
-
+    fn tick(&mut self, ctx: &mut RenderContext) {
         if !self.running {
             return;
         }
@@ -141,11 +152,14 @@ impl Mode for PomodoroMode {
             // tick. Resetting to `now` would drop it and run the timer slow.
             self.last_tick += Duration::from_secs(elapsed_secs.into());
 
-            if self.remaining_secs > elapsed_secs {
-                self.remaining_secs -= elapsed_secs;
-            } else {
-                self.remaining_secs = 0;
-                self.transition_phase(ctx);
+            // Focus time counts only seconds the work timer actually ran.
+            let consumed = elapsed_secs.min(self.remaining_secs);
+            if self.phase == PomodoroPhase::Work {
+                self.total_focus_secs += u64::from(consumed);
+            }
+            self.remaining_secs -= consumed;
+            if self.remaining_secs == 0 {
+                self.transition_phase(ctx, true);
             }
         }
     }
@@ -217,11 +231,7 @@ impl Mode for PomodoroMode {
     fn handle_key(&mut self, key: KeyEvent, ctx: &mut RenderContext) -> bool {
         match key.code {
             KeyCode::Char(' ') => {
-                let was_running = self.running;
-                self.toggle();
-                if !was_running && self.running && self.phase == PomodoroPhase::Work {
-                    ctx.run_command(&ctx.config.on_start.clone());
-                }
+                self.toggle(ctx);
                 true
             }
             KeyCode::Char('r') => {
@@ -229,7 +239,7 @@ impl Mode for PomodoroMode {
                 true
             }
             KeyCode::Char('n') => {
-                self.transition_phase(ctx);
+                self.transition_phase(ctx, false);
                 true
             }
             _ => false,
@@ -246,5 +256,92 @@ impl Mode for PomodoroMode {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn running_pomodoro(ctx: &RenderContext) -> PomodoroMode {
+        let mut pomodoro = PomodoroMode::new(ctx.config.pomodoro_work_mins, 0, 0);
+        pomodoro.toggle(ctx);
+        pomodoro
+    }
+
+    // Tests back-date `last_tick` by seconds only: on Windows `Instant` counts from
+    // boot, and a freshly started CI runner may not have minutes to subtract.
+
+    #[test]
+    fn focus_time_counts_only_seconds_the_work_timer_ran() {
+        let mut ctx = RenderContext::for_test();
+        let mut pomodoro = running_pomodoro(&ctx);
+        pomodoro.last_tick = Instant::now() - Duration::from_millis(2500);
+        pomodoro.tick(&mut ctx);
+
+        // Time spent paused adds nothing; only ticks while running count.
+        pomodoro.toggle(&ctx);
+        pomodoro.last_tick = Instant::now() - Duration::from_millis(2500);
+        pomodoro.tick(&mut ctx);
+
+        assert_eq!(pomodoro.total_focus_secs, 2);
+        assert_eq!(pomodoro.remaining_secs, 25 * 60 - 2);
+    }
+
+    #[test]
+    fn a_completed_work_phase_counts_as_a_session_and_a_skipped_one_does_not() {
+        let mut ctx = RenderContext::for_test();
+        ctx.config.pomodoro_sessions_until_long = 1;
+
+        let mut skipped = running_pomodoro(&ctx);
+        skipped.transition_phase(&mut ctx, false);
+        assert_eq!(skipped.sessions_completed, 0);
+        assert_eq!(skipped.phase, PomodoroPhase::ShortBreak);
+
+        let mut finished = running_pomodoro(&ctx);
+        finished.remaining_secs = 2;
+        finished.last_tick = Instant::now() - Duration::from_millis(2500);
+        finished.tick(&mut ctx);
+        assert_eq!(finished.sessions_completed, 1);
+        assert_eq!(finished.total_focus_secs, 2);
+        assert_eq!(finished.phase, PomodoroPhase::LongBreak);
+        assert!(!finished.started);
+    }
+
+    #[test]
+    fn settings_resize_a_phase_only_until_it_starts() {
+        let mut ctx = RenderContext::for_test();
+        let mut pomodoro = PomodoroMode::new(25, 0, 0);
+        ctx.config.pomodoro_work_mins = 50;
+        pomodoro.sync_duration(&ctx);
+        assert_eq!(pomodoro.remaining_secs, 50 * 60);
+
+        pomodoro.toggle(&ctx);
+        pomodoro.toggle(&ctx);
+        ctx.config.pomodoro_work_mins = 15;
+        pomodoro.sync_duration(&ctx);
+        assert_eq!(pomodoro.remaining_secs, 50 * 60);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn on_start_runs_once_per_work_phase_not_on_every_resume() {
+        let log = std::env::temp_dir().join(format!("sigye-on-start-{}", std::process::id()));
+        let _ = std::fs::remove_file(&log);
+        let mut ctx = RenderContext::for_test();
+        ctx.config.on_start = Some(format!("echo started >> '{}'", log.display()));
+
+        let mut pomodoro = running_pomodoro(&ctx);
+        pomodoro.toggle(&ctx);
+        pomodoro.toggle(&ctx);
+
+        let lines = || std::fs::read_to_string(&log).map_or(0, |text| text.lines().count());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while lines() == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(lines(), 1);
+        std::fs::remove_file(&log).unwrap();
     }
 }

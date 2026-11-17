@@ -1,8 +1,11 @@
 //! Weather data fetching for dynamic weather background.
 //!
-//! Fetches weather data from wttr.in API and maps conditions to background styles.
+//! Fetches weather data from wttr.in in a background thread. The background style
+//! is resolved from that data whenever it is asked for, so dawn, day, dusk and
+//! night follow the clock rather than the time of the last fetch.
 
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -10,8 +13,14 @@ use chrono::Timelike;
 use serde::Deserialize;
 use sigye_core::{BackgroundStyle, TimeOfDay};
 
-/// How often to fetch new weather data (30 minutes).
+/// How long to wait after a successful fetch before fetching again.
 const FETCH_INTERVAL: Duration = Duration::from_secs(30 * 60);
+
+/// How long to wait after a failed fetch before trying again.
+const RETRY_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How often the fetch thread wakes to check whether to stop or fetch.
+const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Timeout for HTTP requests.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -40,18 +49,28 @@ pub struct WeatherData {
     pub condition: WeatherCondition,
     /// Temperature in Celsius.
     pub temp_c: i32,
-    /// Time of day for weather-aware rendering.
-    pub time_of_day: TimeOfDay,
     /// Latitude (for aurora calculation).
     pub latitude: f32,
-    /// Timestamp when this data was fetched.
-    pub fetched_at: Instant,
+    /// Sunrise as wttr.in reports it (e.g., "06:45 AM").
+    pub sunrise: Option<String>,
+    /// Sunset as wttr.in reports it (e.g., "07:30 PM").
+    pub sunset: Option<String>,
 }
 
 impl WeatherData {
-    /// Check if this weather data is still fresh (less than 30 minutes old).
-    pub fn is_fresh(&self) -> bool {
-        self.fetched_at.elapsed() < FETCH_INTERVAL
+    /// The background for this weather at `minutes` past local midnight.
+    ///
+    /// Sunrise and sunset are in the location's local time but are compared with
+    /// this machine's clock, so a location in another time zone is misjudged.
+    fn background_at(&self, minutes: u32) -> BackgroundStyle {
+        let sunrise = self.sunrise.as_deref().and_then(parse_time_to_minutes);
+        let sunset = self.sunset.as_deref().and_then(parse_time_to_minutes);
+        let time_of_day = time_of_day(
+            minutes,
+            sunrise.unwrap_or(6 * 60),
+            sunset.unwrap_or(18 * 60),
+        );
+        map_weather_to_background(self, time_of_day)
     }
 }
 
@@ -60,9 +79,9 @@ impl Default for WeatherData {
         Self {
             condition: WeatherCondition::Clear,
             temp_c: 20,
-            time_of_day: TimeOfDay::Day,
             latitude: 0.0,
-            fetched_at: Instant::now(),
+            sunrise: None,
+            sunset: None,
         }
     }
 }
@@ -104,97 +123,79 @@ struct Astronomy {
 /// Weather monitor that fetches weather data in a background thread.
 #[derive(Debug)]
 pub struct WeatherMonitor {
-    /// Current weather data (if available).
-    weather_data: Arc<RwLock<Option<WeatherData>>>,
-    /// Current resolved background style.
-    resolved_background: Arc<RwLock<BackgroundStyle>>,
+    /// Latest weather fetched, if any fetch has succeeded yet.
+    weather: Arc<RwLock<Option<WeatherData>>>,
     /// Location string (empty for auto-detect).
     location: String,
-    /// Flag to signal thread termination.
-    running: Arc<RwLock<bool>>,
-    /// Sunrise time string (e.g., "06:45 AM").
-    sunrise: Arc<RwLock<Option<String>>>,
-    /// Sunset time string (e.g., "07:30 PM").
-    sunset: Arc<RwLock<Option<String>>>,
+    /// Cleared to tell the fetch thread to exit.
+    running: Arc<AtomicBool>,
 }
 
 impl WeatherMonitor {
     /// Create a new weather monitor.
     pub fn new(location: String) -> Self {
         Self {
-            weather_data: Arc::new(RwLock::new(None)),
-            resolved_background: Arc::new(RwLock::new(BackgroundStyle::Starfield)),
+            weather: Arc::new(RwLock::new(None)),
             location,
-            running: Arc::new(RwLock::new(false)),
-            sunrise: Arc::new(RwLock::new(None)),
-            sunset: Arc::new(RwLock::new(None)),
+            running: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Start the background fetching thread.
     pub fn start(&self) {
-        if let Ok(mut running) = self.running.write() {
-            if *running {
-                return; // Already running
-            }
-            *running = true;
+        if self.running.swap(true, Ordering::Relaxed) {
+            return; // Already running
         }
 
-        let weather_data = self.weather_data.clone();
-        let resolved_bg = self.resolved_background.clone();
+        let weather = self.weather.clone();
         let location = self.location.clone();
         let running = self.running.clone();
-        let sunrise = self.sunrise.clone();
-        let sunset = self.sunset.clone();
 
         thread::spawn(move || {
-            // Fetch immediately on start
-            fetch_and_update(&location, &weather_data, &resolved_bg, &sunrise, &sunset);
-
-            let mut last_fetch = Instant::now();
-
-            loop {
-                // Check if we should stop
-                if let Ok(is_running) = running.read()
-                    && !*is_running
-                {
-                    break;
+            let mut next_fetch = Instant::now();
+            while running.load(Ordering::Relaxed) {
+                if Instant::now() >= next_fetch {
+                    next_fetch = Instant::now()
+                        + match fetch_weather(&location) {
+                            Ok(data) => {
+                                *weather.write().unwrap_or_else(PoisonError::into_inner) =
+                                    Some(data);
+                                FETCH_INTERVAL
+                            }
+                            // Keep showing the last weather fetched: a slightly stale
+                            // guess beats a placeholder. Retry soon.
+                            Err(_) => RETRY_INTERVAL,
+                        };
                 }
-
-                // Fetch new data if interval elapsed
-                if last_fetch.elapsed() >= FETCH_INTERVAL {
-                    fetch_and_update(&location, &weather_data, &resolved_bg, &sunrise, &sunset);
-                    last_fetch = Instant::now();
-                }
-
-                // Sleep for a bit before checking again
-                thread::sleep(Duration::from_secs(60));
+                thread::sleep(POLL_INTERVAL);
             }
         });
     }
 
     /// Stop the background thread.
     pub fn stop(&self) {
-        if let Ok(mut running) = self.running.write() {
-            *running = false;
-        }
+        self.running.store(false, Ordering::Relaxed);
     }
 
-    /// Get the currently resolved background style. The fetch thread holds the lock
-    /// only briefly, so block rather than flash the default if it is contended.
+    /// Get the background style for the latest weather at the current time, or
+    /// Starfield until the first fetch succeeds.
     pub fn get_background(&self) -> BackgroundStyle {
-        // A poisoned lock still holds the last style written.
-        *self
-            .resolved_background
+        let now = chrono::Local::now();
+        let minutes = now.hour() * 60 + now.minute();
+        self.weather
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or(BackgroundStyle::Starfield, |weather| {
+                weather.background_at(minutes)
+            })
     }
 
     /// Get the sunrise and sunset times (if available).
     pub fn get_sunrise_sunset(&self) -> Option<(String, String)> {
-        let sunrise = self.sunrise.read().ok()?.clone()?;
-        let sunset = self.sunset.read().ok()?.clone()?;
-        Some((sunrise, sunset))
+        let weather = self.weather.read().unwrap_or_else(PoisonError::into_inner);
+        let weather = weather.as_ref()?;
+        Some((weather.sunrise.clone()?, weather.sunset.clone()?))
     }
 }
 
@@ -204,53 +205,8 @@ impl Drop for WeatherMonitor {
     }
 }
 
-/// Fetch weather data and update shared state.
-fn fetch_and_update(
-    location: &str,
-    weather_data: &Arc<RwLock<Option<WeatherData>>>,
-    resolved_bg: &Arc<RwLock<BackgroundStyle>>,
-    sunrise_lock: &Arc<RwLock<Option<String>>>,
-    sunset_lock: &Arc<RwLock<Option<String>>>,
-) {
-    match fetch_weather_with_astronomy(location) {
-        Ok((data, sunrise_str, sunset_str)) => {
-            let background = map_weather_to_background(&data);
-
-            if let Ok(mut wd) = weather_data.write() {
-                *wd = Some(data);
-            }
-            if let Ok(mut bg) = resolved_bg.write() {
-                *bg = background;
-            }
-            if let Some(s) = sunrise_str
-                && let Ok(mut sr) = sunrise_lock.write()
-            {
-                *sr = Some(s);
-            }
-            if let Some(s) = sunset_str
-                && let Ok(mut ss) = sunset_lock.write()
-            {
-                *ss = Some(s);
-            }
-        }
-        Err(_e) => {
-            // On error, keep existing data if fresh, otherwise use fallback
-            let should_fallback = weather_data
-                .read()
-                .map(|w| w.as_ref().map(|d| !d.is_fresh()).unwrap_or(true))
-                .unwrap_or(true);
-
-            if should_fallback && let Ok(mut bg) = resolved_bg.write() {
-                *bg = BackgroundStyle::Starfield;
-            }
-        }
-    }
-}
-
-/// Fetch weather data and extract sunrise/sunset strings from the API response.
-fn fetch_weather_with_astronomy(
-    location: &str,
-) -> Result<(WeatherData, Option<String>, Option<String>), String> {
+/// Fetch the current weather for `location` (empty for auto-detect by IP).
+fn fetch_weather(location: &str) -> Result<WeatherData, String> {
     let url = if location.is_empty() {
         "https://wttr.in/?format=j1".to_string()
     } else {
@@ -270,17 +226,7 @@ fn fetch_weather_with_astronomy(
         .read_json()
         .map_err(|e| format!("JSON parse error: {e}"))?;
 
-    // Extract sunrise/sunset strings from astronomy data
-    let (sunrise_str, sunset_str) = response
-        .weather
-        .as_ref()
-        .and_then(|w| w.first())
-        .and_then(|day| day.astronomy.first())
-        .map(|astro| (Some(astro.sunrise.clone()), Some(astro.sunset.clone())))
-        .unwrap_or((None, None));
-
-    let data = parse_weather_response(response)?;
-    Ok((data, sunrise_str, sunset_str))
+    parse_weather_response(response)
 }
 
 /// Parse a WttrResponse into WeatherData.
@@ -314,44 +260,28 @@ fn parse_weather_response(response: WttrResponse) -> Result<WeatherData, String>
         .and_then(|area| area.latitude.parse().ok())
         .unwrap_or(0.0);
 
-    // Determine time of day (day, night, dawn, dusk)
-    let time_of_day = determine_time_of_day(&response);
+    let astronomy = response
+        .weather
+        .as_ref()
+        .and_then(|days| days.first())
+        .and_then(|day| day.astronomy.first());
 
     Ok(WeatherData {
         condition,
         temp_c,
-        time_of_day,
         latitude,
-        fetched_at: Instant::now(),
+        sunrise: astronomy.map(|astro| astro.sunrise.clone()),
+        sunset: astronomy.map(|astro| astro.sunset.clone()),
     })
 }
 
-/// Determine the current time of day based on sunrise/sunset.
-fn determine_time_of_day(response: &WttrResponse) -> TimeOfDay {
-    let Some(weather) = response.weather.as_ref().and_then(|w| w.first()) else {
-        return TimeOfDay::Day; // Default to day
-    };
-
-    let Some(astronomy) = weather.astronomy.first() else {
-        return TimeOfDay::Day;
-    };
-
-    // Parse times (format: "06:45 AM")
-    let now = chrono::Local::now();
-    let current_minutes = now.hour() * 60 + now.minute();
-
-    let sunrise_mins = parse_time_to_minutes(&astronomy.sunrise).unwrap_or(6 * 60);
-    let sunset_mins = parse_time_to_minutes(&astronomy.sunset).unwrap_or(18 * 60);
-
-    // Calculate twilight boundaries
-    let dawn_start = sunrise_mins.saturating_sub(CIVIL_TWILIGHT_MINUTES);
-    let dusk_end = sunset_mins + CIVIL_TWILIGHT_MINUTES;
-
-    if current_minutes >= dawn_start && current_minutes < sunrise_mins {
+/// Classify `minutes` past midnight given sunrise and sunset in the same units.
+fn time_of_day(minutes: u32, sunrise: u32, sunset: u32) -> TimeOfDay {
+    if (sunrise.saturating_sub(CIVIL_TWILIGHT_MINUTES)..sunrise).contains(&minutes) {
         TimeOfDay::Dawn
-    } else if current_minutes >= sunset_mins && current_minutes < dusk_end {
+    } else if (sunset..sunset + CIVIL_TWILIGHT_MINUTES).contains(&minutes) {
         TimeOfDay::Dusk
-    } else if current_minutes >= sunrise_mins && current_minutes < sunset_mins {
+    } else if (sunrise..sunset).contains(&minutes) {
         TimeOfDay::Day
     } else {
         TimeOfDay::Night
@@ -434,10 +364,10 @@ fn parse_weather_code(code: &str) -> WeatherCondition {
     }
 }
 
-/// Map weather data to the appropriate background style.
-fn map_weather_to_background(weather: &WeatherData) -> BackgroundStyle {
+/// Map weather data at the given time of day to the appropriate background style.
+fn map_weather_to_background(weather: &WeatherData, time_of_day: TimeOfDay) -> BackgroundStyle {
     // Twilight for clear or partly cloudy conditions during dawn/dusk
-    if weather.time_of_day == TimeOfDay::Dawn
+    if time_of_day == TimeOfDay::Dawn
         && matches!(
             weather.condition,
             WeatherCondition::Clear | WeatherCondition::PartlyCloudy
@@ -445,7 +375,7 @@ fn map_weather_to_background(weather: &WeatherData) -> BackgroundStyle {
     {
         return BackgroundStyle::TwilightDawn;
     }
-    if weather.time_of_day == TimeOfDay::Dusk
+    if time_of_day == TimeOfDay::Dusk
         && matches!(
             weather.condition,
             WeatherCondition::Clear | WeatherCondition::PartlyCloudy
@@ -455,7 +385,7 @@ fn map_weather_to_background(weather: &WeatherData) -> BackgroundStyle {
     }
 
     // Special case: Aurora for clear nights at high latitudes (> 55°)
-    if weather.time_of_day == TimeOfDay::Night
+    if time_of_day == TimeOfDay::Night
         && weather.condition == WeatherCondition::Clear
         && weather.latitude.abs() > 55.0
     {
@@ -463,7 +393,7 @@ fn map_weather_to_background(weather: &WeatherData) -> BackgroundStyle {
     }
 
     // Night + Clear = Starfield
-    if weather.time_of_day == TimeOfDay::Night && weather.condition == WeatherCondition::Clear {
+    if time_of_day == TimeOfDay::Night && weather.condition == WeatherCondition::Clear {
         return BackgroundStyle::Starfield;
     }
 
@@ -503,76 +433,136 @@ mod tests {
     fn test_map_weather_to_background() {
         let sunny_day = WeatherData {
             condition: WeatherCondition::Clear,
-            time_of_day: TimeOfDay::Day,
+
             temp_c: 25,
             latitude: 40.0,
             ..Default::default()
         };
         assert_eq!(
-            map_weather_to_background(&sunny_day),
+            map_weather_to_background(&sunny_day, TimeOfDay::Day),
             BackgroundStyle::Sunny
         );
 
         let clear_night = WeatherData {
             condition: WeatherCondition::Clear,
-            time_of_day: TimeOfDay::Night,
+
             temp_c: 15,
             latitude: 40.0,
             ..Default::default()
         };
         assert_eq!(
-            map_weather_to_background(&clear_night),
+            map_weather_to_background(&clear_night, TimeOfDay::Night),
             BackgroundStyle::Starfield
         );
 
         let aurora_night = WeatherData {
             condition: WeatherCondition::Clear,
-            time_of_day: TimeOfDay::Night,
+
             temp_c: -5,
             latitude: 65.0, // High latitude
             ..Default::default()
         };
         assert_eq!(
-            map_weather_to_background(&aurora_night),
+            map_weather_to_background(&aurora_night, TimeOfDay::Night),
             BackgroundStyle::Aurora
         );
 
         let very_cold = WeatherData {
             condition: WeatherCondition::Clear,
-            time_of_day: TimeOfDay::Day,
+
             temp_c: -15, // Below -10°C
             latitude: 40.0,
             ..Default::default()
         };
         assert_eq!(
-            map_weather_to_background(&very_cold),
+            map_weather_to_background(&very_cold, TimeOfDay::Day),
             BackgroundStyle::Frost
         );
 
         // Twilight tests
         let dawn = WeatherData {
             condition: WeatherCondition::Clear,
-            time_of_day: TimeOfDay::Dawn,
+
             temp_c: 15,
             latitude: 40.0,
             ..Default::default()
         };
         assert_eq!(
-            map_weather_to_background(&dawn),
+            map_weather_to_background(&dawn, TimeOfDay::Dawn),
             BackgroundStyle::TwilightDawn
         );
 
         let dusk = WeatherData {
             condition: WeatherCondition::PartlyCloudy,
-            time_of_day: TimeOfDay::Dusk,
+
             temp_c: 20,
             latitude: 40.0,
             ..Default::default()
         };
         assert_eq!(
-            map_weather_to_background(&dusk),
+            map_weather_to_background(&dusk, TimeOfDay::Dusk),
             BackgroundStyle::TwilightDusk
         );
+    }
+
+    #[test]
+    fn time_of_day_has_half_hour_twilight_around_sunrise_and_sunset() {
+        let (sunrise, sunset) = (6 * 60, 18 * 60);
+        let at = |h: u32, m: u32| time_of_day(h * 60 + m, sunrise, sunset);
+        assert_eq!(at(5, 29), TimeOfDay::Night);
+        assert_eq!(at(5, 30), TimeOfDay::Dawn);
+        assert_eq!(at(6, 0), TimeOfDay::Day);
+        assert_eq!(at(17, 59), TimeOfDay::Day);
+        assert_eq!(at(18, 0), TimeOfDay::Dusk);
+        assert_eq!(at(18, 30), TimeOfDay::Night);
+    }
+
+    #[test]
+    fn background_follows_the_clock_between_fetches() {
+        let weather = WeatherData {
+            sunrise: Some("06:00 AM".into()),
+            sunset: Some("06:00 PM".into()),
+            latitude: 40.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            weather.background_at(5 * 60 + 45),
+            BackgroundStyle::TwilightDawn
+        );
+        assert_eq!(weather.background_at(12 * 60), BackgroundStyle::Sunny);
+        assert_eq!(
+            weather.background_at(18 * 60 + 10),
+            BackgroundStyle::TwilightDusk
+        );
+        assert_eq!(weather.background_at(23 * 60), BackgroundStyle::Starfield);
+    }
+
+    #[test]
+    fn parses_condition_wind_latitude_and_astronomy() {
+        let response = WttrResponse {
+            current_condition: vec![CurrentCondition {
+                weather_code: "113".into(),
+                temp_c: "-3".into(),
+                windspeed_kmph: "60".into(),
+            }],
+            nearest_area: Some(vec![NearestArea {
+                latitude: "64.1".into(),
+            }]),
+            weather: Some(vec![DailyWeather {
+                astronomy: vec![Astronomy {
+                    sunrise: "10:20 AM".into(),
+                    sunset: "04:05 PM".into(),
+                }],
+            }]),
+        };
+
+        let weather = parse_weather_response(response).unwrap();
+
+        assert_eq!(weather.condition, WeatherCondition::Windy);
+        assert_eq!(weather.temp_c, -3);
+        assert_eq!(weather.latitude, 64.1);
+        assert_eq!(weather.sunrise.as_deref(), Some("10:20 AM"));
+        assert_eq!(weather.sunset.as_deref(), Some("04:05 PM"));
     }
 
     #[test]

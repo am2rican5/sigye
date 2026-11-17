@@ -120,7 +120,7 @@ pub fn update_petals(
 }
 
 /// Render a character at the given position, returning a petal if one exists there.
-pub fn render_petal_char(petals: &[Petal], x: u16, y: u16, _elapsed_ms: u64) -> Span<'static> {
+pub fn render_petal_char(petals: &[Petal], x: u16, y: u16) -> Span<'static> {
     // Check if any petal occupies this position
     for petal in petals {
         let px = petal.x.round() as i32;

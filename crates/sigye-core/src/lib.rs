@@ -618,214 +618,137 @@ impl ColorTheme {
     /// `x` is the horizontal position (column), `y` is the vertical position (row).
     /// `width` and `height` are the total dimensions for normalization.
     pub fn color_at_position(self, x: usize, y: usize, width: usize, height: usize) -> Color {
+        const RAINBOW: [Color; 7] = [
+            Color::Red,
+            Color::Rgb(255, 127, 0), // Orange
+            Color::Yellow,
+            Color::Green,
+            Color::Cyan,
+            Color::Blue,
+            Color::Magenta,
+        ];
+        // Index into RAINBOW for `pos` out of `len` (0 when `len` is 0).
+        let band = |pos: usize, len: usize| (pos * RAINBOW.len() / len.max(1)) % RAINBOW.len();
+        // Horizontal position normalized to 0.0..1.0.
+        let progress = if width > 0 {
+            x as f32 / width as f32
+        } else {
+            0.0
+        };
+
         match self {
-            ColorTheme::Rainbow => {
-                let colors = [
-                    Color::Red,
-                    Color::Rgb(255, 127, 0), // Orange
-                    Color::Yellow,
-                    Color::Green,
-                    Color::Cyan,
-                    Color::Blue,
-                    Color::Magenta,
-                ];
-                let idx = if width > 0 {
-                    (x * colors.len() / width.max(1)) % colors.len()
-                } else {
-                    0
-                };
-                colors[idx]
-            }
-            ColorTheme::RainbowVertical => {
-                let colors = [
-                    Color::Red,
-                    Color::Rgb(255, 127, 0), // Orange
-                    Color::Yellow,
-                    Color::Green,
-                    Color::Cyan,
-                    Color::Blue,
-                    Color::Magenta,
-                ];
-                let idx = if height > 0 {
-                    (y * colors.len() / height.max(1)) % colors.len()
-                } else {
-                    0
-                };
-                colors[idx]
-            }
+            ColorTheme::Rainbow => RAINBOW[band(x, width)],
+            ColorTheme::RainbowVertical => RAINBOW[band(y, height)],
             ColorTheme::GradientWarm => {
                 // Red -> Orange -> Yellow
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
                 if progress < 0.5 {
-                    // Red to Orange
-                    let g = (127.0 * (progress * 2.0)) as u8;
-                    Color::Rgb(255, g, 0)
+                    Color::Rgb(255, (127.0 * (progress * 2.0)) as u8, 0)
                 } else {
-                    // Orange to Yellow
-                    let g = 127 + ((128.0 * ((progress - 0.5) * 2.0)) as u8);
+                    let g = 127 + (128.0 * ((progress - 0.5) * 2.0)) as u8;
                     Color::Rgb(255, g, 0)
                 }
             }
             ColorTheme::GradientCool => {
                 // Blue -> Cyan -> Green
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
                 if progress < 0.5 {
-                    // Blue to Cyan
-                    let g = (255.0 * (progress * 2.0)) as u8;
-                    Color::Rgb(0, g, 255)
+                    Color::Rgb(0, (255.0 * (progress * 2.0)) as u8, 255)
                 } else {
-                    // Cyan to Green
-                    let b = 255 - ((255.0 * ((progress - 0.5) * 2.0)) as u8);
+                    let b = 255 - (255.0 * ((progress - 0.5) * 2.0)) as u8;
                     Color::Rgb(0, 255, b)
                 }
             }
             ColorTheme::GradientOcean => {
                 // Dark blue -> Cyan -> Teal
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
                 if progress < 0.5 {
-                    // Dark blue to Cyan
-                    let r = (100.0 * (progress * 2.0)) as u8;
-                    let g = (150.0 + 105.0 * (progress * 2.0)) as u8;
-                    Color::Rgb(r, g, 255)
+                    let t = progress * 2.0;
+                    Color::Rgb((100.0 * t) as u8, (150.0 + 105.0 * t) as u8, 255)
                 } else {
-                    // Cyan to Teal
-                    let b = 255 - ((127.0 * ((progress - 0.5) * 2.0)) as u8);
-                    Color::Rgb(100, 255, b)
+                    let t = (progress - 0.5) * 2.0;
+                    Color::Rgb(100, 255, 255 - (127.0 * t) as u8)
                 }
             }
             ColorTheme::GradientNeon => {
                 // Magenta -> Cyan (synthwave style)
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
-                let r = 255 - ((255.0 * progress) as u8);
                 let g = (255.0 * progress) as u8;
-                let b = 255;
-                Color::Rgb(r, g, b)
+                Color::Rgb(255 - g, g, 255)
             }
             ColorTheme::GradientFire => {
                 // Dark red -> Red -> Orange -> Yellow (fire effect)
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
                 if progress < 0.33 {
-                    // Dark red to Red
-                    let r = 128 + ((127.0 * (progress * 3.0)) as u8);
-                    Color::Rgb(r, 0, 0)
+                    Color::Rgb(128 + (127.0 * (progress * 3.0)) as u8, 0, 0)
                 } else if progress < 0.66 {
-                    // Red to Orange
-                    let g = (165.0 * ((progress - 0.33) * 3.0)) as u8;
-                    Color::Rgb(255, g, 0)
+                    Color::Rgb(255, (165.0 * ((progress - 0.33) * 3.0)) as u8, 0)
                 } else {
-                    // Orange to Yellow
-                    let g = 165 + ((90.0 * ((progress - 0.66) * 3.0)) as u8);
+                    // The last segment spans 0.34, not 1/3, so the add must saturate:
+                    // it reaches 256 at the right edge of text wider than ~340 columns.
+                    let g = 165u8.saturating_add((90.0 * ((progress - 0.66) * 3.0)) as u8);
                     Color::Rgb(255, g, 0)
                 }
             }
             ColorTheme::GradientFrost => {
                 // White -> Ice Blue -> Steel Blue
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
                 if progress < 0.5 {
-                    // White to Ice Blue
                     let t = progress * 2.0;
-                    let r = 255 - ((255 - 176) as f32 * t) as u8;
-                    let g = 255 - ((255 - 224) as f32 * t) as u8;
-                    let b = 255 - ((255 - 230) as f32 * t) as u8;
-                    Color::Rgb(r, g, b)
+                    Color::Rgb(
+                        255 - (79.0 * t) as u8,
+                        255 - (31.0 * t) as u8,
+                        255 - (25.0 * t) as u8,
+                    )
                 } else {
-                    // Ice Blue to Steel Blue
                     let t = (progress - 0.5) * 2.0;
-                    let r = 176 - ((176 - 70) as f32 * t) as u8;
-                    let g = 224 - ((224 - 130) as f32 * t) as u8;
-                    let b = 230 - ((230 - 180) as f32 * t) as u8;
-                    Color::Rgb(r, g, b)
+                    Color::Rgb(
+                        176 - (106.0 * t) as u8,
+                        224 - (94.0 * t) as u8,
+                        230 - (50.0 * t) as u8,
+                    )
                 }
             }
             ColorTheme::GradientAurora => {
                 // Green -> Cyan -> Blue -> Purple (aurora colors)
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
                 if progress < 0.33 {
-                    // Green to Cyan
                     let t = progress * 3.0;
-                    let r = (0.0 + 0.0 * t) as u8;
-                    let g = (255.0 - 128.0 * t) as u8;
-                    let b = (127.0 + 128.0 * t) as u8;
-                    Color::Rgb(r, g, b)
+                    Color::Rgb(0, (255.0 - 128.0 * t) as u8, (127.0 + 128.0 * t) as u8)
                 } else if progress < 0.66 {
-                    // Cyan to Blue
                     let t = (progress - 0.33) * 3.0;
-                    let r = (0.0 + 65.0 * t) as u8;
-                    let g = (127.0 - 22.0 * t) as u8;
-                    let b = (255.0 - 30.0 * t) as u8;
-                    Color::Rgb(r, g, b)
+                    Color::Rgb(
+                        (65.0 * t) as u8,
+                        (127.0 - 22.0 * t) as u8,
+                        (255.0 - 30.0 * t) as u8,
+                    )
                 } else {
-                    // Blue to Purple
                     let t = (progress - 0.66) * 3.0;
-                    let r = (65.0 + 73.0 * t) as u8;
-                    let g = (105.0 - 62.0 * t) as u8;
-                    let b = (225.0 + 1.0 * t) as u8;
-                    Color::Rgb(r, g, b)
+                    Color::Rgb(
+                        (65.0 + 73.0 * t) as u8,
+                        (105.0 - 62.0 * t) as u8,
+                        (225.0 + t) as u8,
+                    )
                 }
             }
             ColorTheme::GradientWinter => {
                 // Deep Blue -> Royal Blue -> Ice Blue
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
                 if progress < 0.5 {
-                    // Deep Blue to Royal Blue
                     let t = progress * 2.0;
-                    let r = (25.0 + 40.0 * t) as u8;
-                    let g = (25.0 + 80.0 * t) as u8;
-                    let b = (112.0 + 113.0 * t) as u8;
-                    Color::Rgb(r, g, b)
+                    Color::Rgb(
+                        (25.0 + 40.0 * t) as u8,
+                        (25.0 + 80.0 * t) as u8,
+                        (112.0 + 113.0 * t) as u8,
+                    )
                 } else {
-                    // Royal Blue to Ice Blue
                     let t = (progress - 0.5) * 2.0;
-                    let r = (65.0 + 70.0 * t) as u8;
-                    let g = (105.0 + 101.0 * t) as u8;
-                    let b = (225.0 + 25.0 * t) as u8;
-                    Color::Rgb(r, g, b)
+                    Color::Rgb(
+                        (65.0 + 70.0 * t) as u8,
+                        (105.0 + 101.0 * t) as u8,
+                        (225.0 + 25.0 * t) as u8,
+                    )
                 }
             }
             ColorTheme::GradientSakura => {
-                // Sakura Pink -> Light Pink -> Lavender Blush (near white)
-                let progress = if width > 0 {
-                    (x as f32) / (width.max(1) as f32)
-                } else {
-                    0.0
-                };
-                // #FFB7C5 (255, 183, 197) -> #FFF0F5 (255, 240, 245)
-                let r = 255;
-                let g = (183.0 + 57.0 * progress) as u8; // 183 -> 240
-                let b = (197.0 + 48.0 * progress) as u8; // 197 -> 245
-                Color::Rgb(r, g, b)
+                // Sakura pink #FFB7C5 -> lavender blush #FFF0F5
+                Color::Rgb(
+                    255,
+                    (183.0 + 57.0 * progress) as u8,
+                    (197.0 + 48.0 * progress) as u8,
+                )
             }
             // Static themes just return their color
             _ => self.color(),
@@ -1113,34 +1036,12 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
 /// Check if colon should be visible in the blink cycle.
 /// Returns true during the "on" phase (first 500ms of each second).
 pub fn is_colon_visible(elapsed_ms: u64) -> bool {
-    let phase = (elapsed_ms % 1000) as f32 / 1000.0;
-    phase < 0.5
+    elapsed_ms % 1000 < 500
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const TEST_THEMES: &[ColorTheme] = &[
-        ColorTheme::Cyan,
-        ColorTheme::Green,
-        ColorTheme::White,
-        ColorTheme::Magenta,
-        ColorTheme::Yellow,
-        ColorTheme::Red,
-        ColorTheme::Blue,
-        ColorTheme::Rainbow,
-        ColorTheme::RainbowVertical,
-        ColorTheme::GradientWarm,
-        ColorTheme::GradientCool,
-        ColorTheme::GradientOcean,
-        ColorTheme::GradientNeon,
-        ColorTheme::GradientFire,
-        ColorTheme::GradientFrost,
-        ColorTheme::GradientAurora,
-        ColorTheme::GradientWinter,
-        ColorTheme::GradientSakura,
-    ];
 
     #[test]
     fn color_to_rgb_maps_named_colors_used_by_app() {
@@ -1216,8 +1117,21 @@ mod tests {
     }
 
     #[test]
+    fn color_at_position_never_overflows_on_very_wide_text() {
+        for theme in ALL_THEMES {
+            for x in 0..2000 {
+                theme.color_at_position(x, 0, 2000, 1);
+            }
+        }
+        assert_eq!(
+            ColorTheme::GradientFire.color_at_position(1999, 0, 2000, 1),
+            Color::Rgb(255, 255, 0)
+        );
+    }
+
+    #[test]
     fn secondary_and_muted_colors_meet_wcag_contrast_floor_for_every_theme() {
-        for theme in TEST_THEMES {
+        for theme in ALL_THEMES {
             let secondary_contrast = contrast_ratio_on_black(theme.secondary_color());
             let muted_contrast = contrast_ratio_on_black(theme.muted_color());
 

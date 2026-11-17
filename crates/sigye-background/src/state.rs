@@ -81,6 +81,10 @@ impl BackgroundState {
         let area = frame.area();
         let width = area.width;
         let height = area.height;
+        if area.is_empty() {
+            // Nothing to draw, and the stateful animations take sizes modulo width/height.
+            return;
+        }
 
         // Handle reactive backgrounds separately
         if style.is_reactive() {
@@ -197,7 +201,7 @@ impl BackgroundState {
             BackgroundStyle::Rainy => weather::render_rain_char(&self.rain_columns, x, y),
             BackgroundStyle::Stormy => {
                 if let Some(ref storm) = self.storm_state {
-                    weather::render_storm_char(storm, x, y, elapsed_ms)
+                    weather::render_storm_char(storm, x, y)
                 } else {
                     Span::raw(" ")
                 }
@@ -221,9 +225,7 @@ impl BackgroundState {
             BackgroundStyle::TwilightDusk => {
                 stateless::render_twilight_dusk_char(x, y, width, height, elapsed_ms, speed)
             }
-            BackgroundStyle::CherryBlossom => {
-                sakura::render_petal_char(&self.petals, x, y, elapsed_ms)
-            }
+            BackgroundStyle::CherryBlossom => sakura::render_petal_char(&self.petals, x, y),
             // Reactive backgrounds are handled separately in render_reactive()
             BackgroundStyle::SystemPulse
             | BackgroundStyle::ResourceWave
@@ -255,6 +257,34 @@ impl BackgroundState {
                 reactive::render_heat_map(frame, elapsed_ms, speed, metrics)
             }
             _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use super::*;
+
+    #[test]
+    fn stateful_backgrounds_survive_an_empty_terminal() {
+        let stateful = [
+            BackgroundStyle::MatrixRain,
+            BackgroundStyle::Snowfall,
+            BackgroundStyle::Rainy,
+            BackgroundStyle::Stormy,
+            BackgroundStyle::Windy,
+            BackgroundStyle::CherryBlossom,
+        ];
+        for (width, height) in [(0, 0), (10, 0), (0, 10)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut state = BackgroundState::new();
+            for style in stateful {
+                terminal
+                    .draw(|frame| state.render(frame, style, 1000, AnimationSpeed::Medium, None))
+                    .unwrap();
+            }
         }
     }
 }

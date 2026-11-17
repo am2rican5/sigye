@@ -101,3 +101,21 @@ impl Default for FontRegistry {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_bundled_font_parses_and_renders_a_clock() {
+        let registry = FontRegistry::new();
+        assert_eq!(registry.list_fonts().len(), BUNDLED_FONTS.len());
+
+        for (name, _) in BUNDLED_FONTS {
+            let font = registry.get_or_default(name);
+            let lines = font.render_text("12:34:56 PM");
+            assert_eq!(lines.len(), font.height, "{name}");
+            assert!(lines.iter().any(|line| !line.trim().is_empty()), "{name}");
+        }
+    }
+}

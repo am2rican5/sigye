@@ -128,17 +128,16 @@ fn parse_character<'a>(
 ) -> Result<Vec<String>, ParseError> {
     let mut char_lines = Vec::with_capacity(height);
 
-    for i in 0..height {
+    for _ in 0..height {
         let line = lines.next().ok_or(ParseError::UnexpectedEndOfFile)?;
 
-        // Remove end markers (@ or @@)
-        // TLF format may have trailing whitespace after @ markers, so trim whitespace first
-        let cleaned = if i == height - 1 {
-            // Last line ends with @@
-            line.trim_end().trim_end_matches('@')
-        } else {
-            // Other lines end with @
-            line.trim_end().trim_end_matches('@')
+        // The endmark is whatever character ends the line (usually `@`, doubled on a
+        // glyph's last line); strip every trailing occurrence of it. TLF fonts may
+        // have trailing whitespace after the endmark, so trim that first.
+        let line = line.trim_end();
+        let cleaned = match line.chars().next_back() {
+            Some(endmark) => line.trim_end_matches(endmark),
+            None => line,
         };
 
         // Replace hardblank with space
@@ -160,6 +159,15 @@ mod tests {
         assert_eq!(header.hardblank, '$');
         assert_eq!(header.height, 5);
         assert_eq!(header.comment_lines, 10);
+    }
+
+    #[test]
+    fn strips_whichever_endmark_the_glyph_uses() {
+        let mut lines = ["@@ #", "@@ ##"].into_iter();
+        assert_eq!(parse_character(&mut lines, 2, '$').unwrap(), ["@@ ", "@@ "]);
+
+        let mut lines = [" $1@  ", " $1@@ "].into_iter();
+        assert_eq!(parse_character(&mut lines, 2, '$').unwrap(), ["  1", "  1"]);
     }
 
     #[test]

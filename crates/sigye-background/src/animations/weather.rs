@@ -247,7 +247,7 @@ pub fn update_storm(
 }
 
 /// Render a storm character.
-pub fn render_storm_char(state: &StormState, x: u16, y: u16, _elapsed_ms: u64) -> Span<'static> {
+pub fn render_storm_char(state: &StormState, x: u16, y: u16) -> Span<'static> {
     let x_idx = x as usize;
     let y_f = y as f32;
 

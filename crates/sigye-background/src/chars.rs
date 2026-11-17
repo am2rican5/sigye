@@ -3,10 +3,11 @@
 /// Characters used for starfield background.
 pub const STAR_CHARS: &[char] = &['.', '*', '+', '·', '✦', '✧'];
 
-/// Characters used for matrix rain.
+/// Characters used for matrix rain. The katakana are the half-width forms: the
+/// full-width ones take two cells each and knock the rain columns out of line.
 pub const MATRIX_CHARS: &[char] = &[
-    'ア', 'イ', 'ウ', 'エ', 'オ', 'カ', 'キ', 'ク', 'ケ', 'コ', 'サ', 'シ', 'ス', 'セ', 'ソ', 'タ',
-    'チ', 'ツ', 'テ', 'ト', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'ｱ', 'ｲ', 'ｳ', 'ｴ', 'ｵ', 'ｶ', 'ｷ', 'ｸ', 'ｹ', 'ｺ', 'ｻ', 'ｼ', 'ｽ', 'ｾ', 'ｿ', 'ﾀ', 'ﾁ', 'ﾂ', 'ﾃ',
+    'ﾄ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
 ];
 
 /// Characters used for snowfall background.
@@ -37,3 +38,31 @@ pub const FOG_CHARS: &[char] = &['·', '.', '\'', ':', '°', '∙', ','];
 
 /// Characters used for cherry blossom petals.
 pub const PETAL_CHARS: &[char] = &['✿', '❀', '✾', '·', '°'];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Backgrounds place one glyph per terminal cell, so a wide glyph would shift
+    /// everything to its right and push the end of the row off screen.
+    #[test]
+    fn every_background_glyph_is_one_cell_wide() {
+        let sets = [
+            STAR_CHARS,
+            MATRIX_CHARS,
+            SNOW_CHARS,
+            FROST_CHARS,
+            RAIN_CHARS,
+            STORM_RAIN_CHARS,
+            SUN_CHARS,
+            WIND_CHARS,
+            CLOUD_CHARS,
+            FOG_CHARS,
+            PETAL_CHARS,
+        ];
+        for &ch in sets.into_iter().flatten() {
+            let width = ratatui::text::Span::raw(ch.to_string()).width();
+            assert_eq!(width, 1, "{ch:?} is {width} cells wide");
+        }
+    }
+}

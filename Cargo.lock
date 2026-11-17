@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "sigye"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -1795,7 +1795,7 @@ dependencies = [
 
 [[package]]
 name = "sigye-background"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "ratatui",
  "sigye-core",
@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "sigye-config"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "directories",
  "serde",
@@ -1813,7 +1813,7 @@ dependencies = [
 
 [[package]]
 name = "sigye-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "ratatui",
  "serde",
@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "sigye-fonts"
-version = "0.6.0"
+version = "0.7.0"
 
 [[package]]
 name = "simd-adler32"

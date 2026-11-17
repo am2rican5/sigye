@@ -111,7 +111,7 @@ Options:
   --start                Auto-start the active timer mode (pomodoro, timer, or stopwatch)
   --pomo                 Start in pomodoro mode and auto-start
   --sw                   Start in stopwatch mode and auto-start
-  --timer <MINS>         Set timer duration in minutes and auto-start timer mode
+  --timer <MINS>         Set timer duration in minutes (1-99) and auto-start timer mode
   --once                 Print time once and exit (no TUI)
   --format <FORMAT>      Output format for --once (human, unix, iso, hex) [default: human]
   -h, --help             Print help
@@ -149,6 +149,7 @@ sigye --timer 10 --on-complete "./notify.sh done"
 | Key | Action |
 |-----|--------|
 | `q` / `Esc` | Quit |
+| `Ctrl+C` | Quit (also from inside dialogs) |
 | `m` | Cycle display mode (Clock / Pomodoro / Timer / Stopwatch / World Clock / Countdown) |
 | `M` | Open mode picker dialog (1-6 to jump, ↑↓ to navigate, Enter to pick) |
 | `t` | Toggle 12/24 hour format |
@@ -243,11 +244,11 @@ timer_duration_mins = 5
 
 ### Hooks
 
-Optional shell commands (run with `sh -c`) fired by the timers:
+Optional shell commands fired by the timers, run with `sh -c` (`cmd /C` on Windows). Their output is discarded so it cannot draw over the clock. Timers keep running, and fire their hooks and notifications, while another mode is on screen.
 
 ```toml
 on_complete = "./notify.sh done"    # Timer finished, or any Pomodoro phase change
-on_start = "./notify.sh focus"      # A Pomodoro work phase begins or resumes
+on_start = "./notify.sh focus"      # A Pomodoro work phase is started (not on resume)
 on_break = "./notify.sh break"      # A Pomodoro break begins
 ```
 
@@ -341,6 +342,8 @@ Cyan, Green, White, Magenta, Yellow, Red, Blue
 | Snowfall | Drifting snowflakes in shades of blue |
 | Frost | Ice crystals growing from screen edges |
 | Aurora | Northern lights in green, cyan, blue, and purple |
+
+The Weather background refreshes every 30 minutes (every minute after a failed fetch, keeping the last conditions meanwhile) and switches between dawn, day, dusk, and night as the clock moves. It compares the location's sunrise and sunset with your computer's clock, so set `weather_location` to a place in your own time zone.
 
 ### Twilight & Spring
 

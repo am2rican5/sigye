@@ -18,8 +18,8 @@ use crate::render::{self, AsciiTextParams};
 
 /// World Clock display mode — shows multiple timezone clocks.
 pub struct WorldClockMode {
-    /// (label, timezone string) pairs.
-    pub entries: Vec<(String, String)>,
+    /// (label, timezone) pairs.
+    pub entries: Vec<(String, Tz)>,
 }
 
 impl WorldClockMode {
@@ -37,23 +37,12 @@ impl WorldClockMode {
 }
 
 /// Parse "Label=Timezone" strings into (label, tz) pairs. Invalid entries are skipped.
-fn parse_zones(zones: &[String]) -> Vec<(String, String)> {
+fn parse_zones(zones: &[String]) -> Vec<(String, Tz)> {
     zones
         .iter()
         .filter_map(|entry| {
-            let parts: Vec<&str> = entry.splitn(2, '=').collect();
-            if parts.len() == 2 {
-                let label = parts[0].trim().to_string();
-                let tz_str = parts[1].trim().to_string();
-                // Validate timezone
-                if Tz::from_str(&tz_str).is_ok() {
-                    Some((label, tz_str))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            let (label, tz) = entry.split_once('=')?;
+            Some((label.trim().to_string(), Tz::from_str(tz.trim()).ok()?))
         })
         .collect()
 }
@@ -106,7 +95,7 @@ impl Mode for WorldClockMode {
 
         let params = AsciiTextParams::from_ctx(ctx, ctx.color());
 
-        for (i, (label, tz_str)) in self.entries.iter().enumerate() {
+        for (i, (label, tz)) in self.entries.iter().enumerate() {
             let chunk_idx = 1 + i; // offset by the leading Fill(1)
 
             let entry_area = chunks[chunk_idx];
@@ -120,14 +109,10 @@ impl Mode for WorldClockMode {
             render::render_centered_text(frame, entry_chunks[0], label, ctx.dim_color());
 
             // Render time in FIGlet font
-            let time_str = if let Ok(tz) = Tz::from_str(tz_str) {
-                let local_time = now_utc.with_timezone(&tz);
-                match ctx.time_format {
-                    TimeFormat::TwelveHour => local_time.format("%I:%M %p").to_string(),
-                    TimeFormat::TwentyFourHour => local_time.format("%H:%M").to_string(),
-                }
-            } else {
-                "??:??".to_string()
+            let local_time = now_utc.with_timezone(tz);
+            let time_str = match ctx.time_format {
+                TimeFormat::TwelveHour => local_time.format("%I:%M %p").to_string(),
+                TimeFormat::TwentyFourHour => local_time.format("%H:%M").to_string(),
             };
 
             render::render_ascii_text(frame, entry_chunks[1], font, &time_str, &params);
@@ -149,5 +134,24 @@ impl Mode for WorldClockMode {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_label_and_timezone_and_skips_invalid_entries() {
+        let zones = [
+            " Seoul = Asia/Seoul ".to_string(),
+            "Nowhere=Not/AZone".to_string(),
+            "no separator".to_string(),
+        ];
+
+        assert_eq!(
+            parse_zones(&zones),
+            [("Seoul".to_string(), chrono_tz::Asia::Seoul)]
+        );
     }
 }

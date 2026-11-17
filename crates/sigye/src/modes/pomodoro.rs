@@ -1,7 +1,7 @@
 //! Pomodoro display mode.
 
 use std::any::Any;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -110,10 +110,6 @@ impl PomodoroMode {
         } else {
             ctx.run_command(&ctx.config.on_break.clone());
         }
-
-        if self.phase == PomodoroPhase::Work {
-            self.work_start = None;
-        }
     }
 }
 
@@ -138,11 +134,12 @@ impl Mode for PomodoroMode {
             return;
         }
 
-        let elapsed = self.last_tick.elapsed();
-        let elapsed_secs = elapsed.as_secs() as u32;
+        let elapsed_secs = self.last_tick.elapsed().as_secs() as u32;
 
         if elapsed_secs >= 1 {
-            self.last_tick = Instant::now();
+            // Advance by the whole seconds consumed, keeping the fraction for the next
+            // tick. Resetting to `now` would drop it and run the timer slow.
+            self.last_tick += Duration::from_secs(elapsed_secs.into());
 
             if self.remaining_secs > elapsed_secs {
                 self.remaining_secs -= elapsed_secs;
@@ -189,9 +186,9 @@ impl Mode for PomodoroMode {
             ctx.color()
         };
         let phase_label = format!(
-            "{} {}",
+            "{}{}",
             self.phase.display_name(),
-            if self.running { "" } else { "(PAUSED)" }
+            if self.running { "" } else { " (PAUSED)" }
         );
         render::render_centered_text(frame, chunks[2], &phase_label, phase_color);
 

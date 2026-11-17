@@ -24,7 +24,6 @@ pub struct RenderContext {
     pub flash_start: Option<Instant>,
     pub screensaver_mode: bool,
     pub on_complete_command: Option<String>,
-    pub desktop_notifications: bool,
     pub sunrise_sunset: Option<(String, String)>,
 }
 
@@ -88,7 +87,11 @@ impl RenderContext {
             std::thread::spawn({
                 let cmd = cmd.clone();
                 move || {
-                    let _ = std::process::Command::new("sh").arg("-c").arg(&cmd).spawn();
+                    // Wait for the command so the finished child is reaped, not left a zombie.
+                    let _ = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(&cmd)
+                        .status();
                 }
             });
         }
@@ -96,11 +99,40 @@ impl RenderContext {
 
     /// Send a desktop notification if enabled.
     pub fn send_notification(&self, title: &str, body: &str) {
-        if self.desktop_notifications {
+        if self.config.desktop_notifications {
             let _ = notify_rust::Notification::new()
                 .summary(title)
                 .body(body)
                 .show();
+        }
+    }
+
+    /// A context built from the default config, with bell and desktop notifications
+    /// off so tests can run timers to completion quietly.
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        let config = Config {
+            pomodoro_sound: false,
+            desktop_notifications: false,
+            ..Config::default()
+        };
+        Self {
+            time_format: config.time_format,
+            color_theme: config.color_theme,
+            animation_style: config.animation_style,
+            animation_speed: config.animation_speed,
+            colon_blink: config.colon_blink,
+            show_seconds: config.show_seconds,
+            background_style: config.background_style,
+            current_font: config.font_name.clone(),
+            font_registry: FontRegistry::new(),
+            on_complete_command: None,
+            config,
+            animation_start: Instant::now(),
+            flash_intensity: 0.0,
+            flash_start: None,
+            screensaver_mode: false,
+            sunrise_sunset: None,
         }
     }
 }

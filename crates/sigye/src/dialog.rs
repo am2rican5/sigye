@@ -54,6 +54,11 @@ pub mod test_helpers {
         None
     }
 
+    /// Whether `text` is rendered anywhere in the buffer.
+    pub fn contains_text(backend: &TestBackend, text: &str) -> bool {
+        color_of_text(backend, text).is_some()
+    }
+
     /// Whether `text` is rendered starting at cell `(x, y)`.
     pub fn text_matches_at(backend: &TestBackend, x: u16, y: u16, text: &str) -> bool {
         let buffer = backend.buffer();

@@ -180,18 +180,14 @@ impl WeatherMonitor {
         }
     }
 
-    /// Get the currently resolved background style.
-    /// Non-blocking when possible; the fetch thread holds the lock only briefly,
-    /// so block rather than flash the default if it is momentarily contended.
+    /// Get the currently resolved background style. The fetch thread holds the lock
+    /// only briefly, so block rather than flash the default if it is contended.
     pub fn get_background(&self) -> BackgroundStyle {
-        if let Ok(bg) = self.resolved_background.try_read() {
-            return *bg;
-        }
-        if let Ok(bg) = self.resolved_background.read() {
-            return *bg;
-        }
-        // Lock poisoned: last resort.
-        BackgroundStyle::Starfield
+        // A poisoned lock still holds the last style written.
+        *self
+            .resolved_background
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Get the sunrise and sunset times (if available).
@@ -199,12 +195,6 @@ impl WeatherMonitor {
         let sunrise = self.sunrise.read().ok()?.clone()?;
         let sunset = self.sunset.read().ok()?.clone()?;
         Some((sunrise, sunset))
-    }
-}
-
-impl Default for WeatherMonitor {
-    fn default() -> Self {
-        Self::new(String::new())
     }
 }
 
@@ -393,13 +383,24 @@ fn parse_time_to_minutes(time_str: &str) -> Option<u32> {
     Some(hours * 60 + minutes)
 }
 
-/// Simple URL encoding for location strings.
+/// Percent-encode a location for the wttr.in URL path (spaces become `+`), so
+/// non-ASCII names such as "서울" and characters like `?`, `#` and `/` survive.
 fn url_encode(s: &str) -> String {
-    s.replace(' ', "+").replace(',', "%2C")
+    let mut encoded = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            b' ' => encoded.push('+'),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 /// Map wttr.in weather code to our simplified condition.
-/// See: https://www.worldweatheronline.com/developer/api/docs/weather-icons.aspx
+/// See: <https://www.worldweatheronline.com/developer/api/docs/weather-icons.aspx>
 fn parse_weather_code(code: &str) -> WeatherCondition {
     match code {
         // Clear/Sunny
@@ -586,6 +587,8 @@ mod tests {
     fn test_url_encode() {
         assert_eq!(url_encode("New York"), "New+York");
         assert_eq!(url_encode("Seoul, Korea"), "Seoul%2C+Korea");
+        assert_eq!(url_encode("서울"), "%EC%84%9C%EC%9A%B8");
+        assert_eq!(url_encode("a/b?c#d&e"), "a%2Fb%3Fc%23d%26e");
     }
 
     #[test]

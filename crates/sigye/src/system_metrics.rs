@@ -48,7 +48,9 @@ impl SystemMonitor {
         thread::spawn(move || {
             // sysinfo 0.40 constructors return Result; if refresh setup
             // fails, leave metrics at their defaults and exit the thread.
-            let Ok(mut sys) = System::new_all() else {
+            // Only CPU and memory are read, so skip `new_all`/`refresh_all`,
+            // which would also enumerate every process on the machine.
+            let Ok(mut sys) = System::new() else {
                 return;
             };
             let Ok(mut networks) = Networks::new_with_refreshed_list() else {
@@ -56,8 +58,8 @@ impl SystemMonitor {
             };
             let mut max_values = MaxValues::default();
 
-            // Initial refresh to get baseline
-            sys.refresh_all();
+            // Initial refresh to get a CPU usage baseline
+            sys.refresh_cpu_all();
             thread::sleep(Duration::from_millis(500));
 
             // Track previous network bytes for rate calculation
@@ -145,24 +147,14 @@ impl SystemMonitor {
         }
     }
 
-    /// Get the current system metrics.
-    /// Non-blocking when possible; the writer holds the lock only briefly, so
+    /// Get the current system metrics. The writer holds the lock only briefly, so
     /// block rather than fabricate zeros if it is momentarily contended.
     pub fn get_metrics(&self) -> SystemMetrics {
-        if let Ok(m) = self.metrics.try_read() {
-            return m.clone();
-        }
-        if let Ok(m) = self.metrics.read() {
-            return m.clone();
-        }
-        // Lock poisoned: last resort.
-        SystemMetrics::default()
-    }
-}
-
-impl Default for SystemMonitor {
-    fn default() -> Self {
-        Self::new()
+        // A poisoned lock still holds the last metrics written.
+        self.metrics
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 

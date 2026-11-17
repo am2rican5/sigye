@@ -36,33 +36,39 @@ impl ClockMode {
     pub fn new() -> Self {
         let now = Local::now();
         Self {
-            last_second: now.format("%S").to_string().parse().unwrap_or(0),
-            last_minute: now.format("%M").to_string().parse().unwrap_or(0),
-            last_hour: now.format("%H").to_string().parse().unwrap_or(0),
+            last_second: now.second(),
+            last_minute: now.minute(),
+            last_hour: now.hour(),
             display_format: ClockDisplayFormat::HumanReadable,
             toast_message: None,
             toast_start: None,
         }
     }
 
+    /// Record the time and return the flash intensity for the largest unit that
+    /// changed since the last call, if any. All three units are recorded every time,
+    /// so an hour or minute change flashes once instead of being cut short by the
+    /// weaker flashes of the units below it on the following frames.
+    fn tick(&mut self, hour: u32, minute: u32, second: u32) -> Option<f32> {
+        let intensity = if hour != self.last_hour {
+            Some(1.0)
+        } else if minute != self.last_minute {
+            Some(0.7)
+        } else if second != self.last_second {
+            Some(0.3)
+        } else {
+            None
+        };
+        (self.last_hour, self.last_minute, self.last_second) = (hour, minute, second);
+        intensity
+    }
+
     /// Detect time changes and trigger flash effects with appropriate intensity.
     fn update_flash(&mut self, ctx: &mut RenderContext) {
         let now = Local::now();
-        let second: u32 = now.format("%S").to_string().parse().unwrap_or(0);
-        let minute: u32 = now.format("%M").to_string().parse().unwrap_or(0);
-        let hour: u32 = now.format("%H").to_string().parse().unwrap_or(0);
-
-        if hour != self.last_hour {
-            ctx.trigger_flash(1.0);
-            self.last_hour = hour;
-        } else if minute != self.last_minute {
-            ctx.trigger_flash(0.7);
-            self.last_minute = minute;
-        } else if second != self.last_second {
-            ctx.trigger_flash(0.3);
-            self.last_second = second;
+        if let Some(intensity) = self.tick(now.hour(), now.minute(), now.second()) {
+            ctx.trigger_flash(intensity);
         }
-
         ctx.decay_flash();
     }
 
@@ -80,12 +86,6 @@ impl ClockMode {
             return Some(msg.as_str());
         }
         None
-    }
-}
-
-impl Default for ClockMode {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -248,25 +248,8 @@ impl Mode for ClockMode {
 
         // Build the text to display as big ASCII art based on display_format
         let big_text = match self.display_format {
-            ClockDisplayFormat::HumanReadable => match ctx.time_format {
-                TimeFormat::TwelveHour => {
-                    if ctx.show_seconds {
-                        now.format("%I:%M:%S %p").to_string()
-                    } else {
-                        now.format("%I:%M %p").to_string()
-                    }
-                }
-                TimeFormat::TwentyFourHour => {
-                    if ctx.show_seconds {
-                        now.format("%H:%M:%S").to_string()
-                    } else {
-                        now.format("%H:%M").to_string()
-                    }
-                }
-            },
-            ClockDisplayFormat::UnixTimestamp => now.timestamp().to_string(),
-            ClockDisplayFormat::Iso8601 => {
-                // Big text is still the normal time; ISO string goes in the info line
+            // ISO 8601 keeps the normal big clock; the ISO string goes in the info line.
+            ClockDisplayFormat::HumanReadable | ClockDisplayFormat::Iso8601 => {
                 match ctx.time_format {
                     TimeFormat::TwelveHour => {
                         if ctx.show_seconds {
@@ -284,6 +267,7 @@ impl Mode for ClockMode {
                     }
                 }
             }
+            ClockDisplayFormat::UnixTimestamp => now.timestamp().to_string(),
             ClockDisplayFormat::HexTime => {
                 let h = now.hour();
                 let m = now.minute();
@@ -343,14 +327,12 @@ impl Mode for ClockMode {
                 (h * 3600 + m * 60 + s) as f64 / 86400.0
             };
             let year_progress = {
-                let day_of_year = now.ordinal() as f64;
-                let year = now.year();
-                let days_in_year = if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
+                let days_in_year = if now.date_naive().leap_year() {
                     366.0
                 } else {
                     365.0
                 };
-                day_of_year / days_in_year
+                now.ordinal() as f64 / days_in_year
             };
 
             // Center the two bars with a gap between them
@@ -444,64 +426,51 @@ impl Mode for ClockMode {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use ratatui::{Terminal, backend::TestBackend};
-    use sigye_config::Config;
-    use sigye_fonts::FontRegistry;
 
     use super::*;
+    use crate::dialog::test_helpers::contains_text;
 
-    fn render_context(screensaver_mode: bool) -> RenderContext {
-        let config = Config::default();
-        RenderContext {
-            time_format: config.time_format,
-            color_theme: config.color_theme,
-            animation_style: config.animation_style,
-            animation_speed: config.animation_speed,
-            colon_blink: config.colon_blink,
-            show_seconds: config.show_seconds,
-            background_style: config.background_style,
-            current_font: config.font_name.clone(),
-            font_registry: FontRegistry::new(),
-            on_complete_command: config.on_complete.clone(),
-            config,
-            animation_start: Instant::now(),
-            flash_intensity: 0.0,
-            flash_start: None,
-            screensaver_mode,
-            desktop_notifications: false,
-            sunrise_sunset: None,
-        }
+    #[test]
+    fn each_time_change_flashes_once_at_the_largest_changed_unit() {
+        let mut mode = ClockMode::new();
+        (mode.last_hour, mode.last_minute, mode.last_second) = (9, 59, 59);
+
+        assert_eq!(mode.tick(10, 0, 0), Some(1.0));
+        assert_eq!(mode.tick(10, 0, 0), None);
+        assert_eq!(mode.tick(10, 1, 0), Some(0.7));
+        assert_eq!(mode.tick(10, 1, 0), None);
+        assert_eq!(mode.tick(10, 1, 1), Some(0.3));
     }
 
     #[test]
     fn render_shows_settings_hint_by_default() {
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         let mode = ClockMode::new();
-        let ctx = render_context(false);
+        let ctx = RenderContext::for_test();
 
         terminal.draw(|frame| mode.render(frame, &ctx)).unwrap();
 
-        assert!(buffer_contains_text(terminal.backend(), "[s] settings"));
+        assert!(contains_text(terminal.backend(), "[s] settings"));
     }
 
     #[test]
     fn render_hides_settings_hint_in_screensaver_mode() {
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         let mode = ClockMode::new();
-        let ctx = render_context(true);
+        let mut ctx = RenderContext::for_test();
+        ctx.screensaver_mode = true;
 
         terminal.draw(|frame| mode.render(frame, &ctx)).unwrap();
 
-        assert!(!buffer_contains_text(terminal.backend(), "[s] settings"));
+        assert!(!contains_text(terminal.backend(), "[s] settings"));
     }
 
     #[test]
     fn render_minimal_view_shows_only_centered_clock() {
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         let mode = ClockMode::new();
-        let mut ctx = render_context(false);
+        let mut ctx = RenderContext::for_test();
         ctx.config.minimal_mode = true;
         ctx.sunrise_sunset = Some(("06:00".into(), "18:00".into()));
         let date = Local::now().format("%A, %B %-d, %Y").to_string();
@@ -509,30 +478,17 @@ mod tests {
         terminal.draw(|frame| mode.render(frame, &ctx)).unwrap();
 
         let backend = terminal.backend();
-        assert!(!buffer_contains_text(backend, &date));
-        assert!(!buffer_contains_text(backend, "Sunrise"));
-        assert!(!buffer_contains_text(backend, "Day"));
-        assert!(!buffer_contains_text(backend, "Year"));
-        assert!(!buffer_contains_text(backend, "[s] settings"));
+        assert!(!contains_text(backend, &date));
+        assert!(!contains_text(backend, "Sunrise"));
+        assert!(!contains_text(backend, "Day"));
+        assert!(!contains_text(backend, "Year"));
+        assert!(!contains_text(backend, "[s] settings"));
 
         let rows = occupied_rows(backend);
         assert!(!rows.is_empty());
         let top_padding = rows[0];
         let bottom_padding = 39 - rows[rows.len() - 1];
         assert!(top_padding.abs_diff(bottom_padding) <= 1);
-    }
-
-    fn buffer_contains_text(backend: &TestBackend, text: &str) -> bool {
-        let buffer = backend.buffer();
-        let area = buffer.area;
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                if text_matches_at(backend, x, y, text) {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     fn occupied_rows(backend: &TestBackend) -> Vec<u16> {
@@ -544,14 +500,5 @@ mod tests {
                     .any(|x| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
             })
             .collect()
-    }
-
-    fn text_matches_at(backend: &TestBackend, x: u16, y: u16, text: &str) -> bool {
-        let buffer = backend.buffer();
-        text.chars().enumerate().all(|(offset, ch)| {
-            buffer
-                .cell((x + offset as u16, y))
-                .is_some_and(|cell| cell.symbol() == ch.to_string())
-        })
     }
 }

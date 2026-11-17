@@ -365,7 +365,7 @@ impl SettingsDialog {
         }
         // Scroll down if selected field is below the visible window
         if row_idx >= self.scroll_offset + visible_rows {
-            self.scroll_offset = row_idx.saturating_sub(visible_rows - 1);
+            self.scroll_offset = row_idx.saturating_sub(visible_rows.saturating_sub(1));
         }
     }
 
@@ -881,6 +881,17 @@ mod tests {
         assert_eq!(color_of_text(backend, "Speed: "), Some(dim));
         assert_eq!(color_of_text(backend, " save"), Some(muted));
         assert_eq!(color_of_text(backend, "Cyan"), Some(Color::White));
+    }
+
+    #[test]
+    fn render_survives_a_terminal_too_short_for_any_settings_row() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 6)).unwrap();
+        let mut dialog = dialog_at(SettingsField::TimerDuration);
+        dialog.visible = true;
+
+        terminal
+            .draw(|frame| dialog.render(frame, frame.area(), Color::Red, Color::Gray, Color::Gray))
+            .unwrap();
     }
 
     fn dialog_at(field: SettingsField) -> SettingsDialog {

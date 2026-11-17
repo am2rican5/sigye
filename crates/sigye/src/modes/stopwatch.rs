@@ -73,12 +73,6 @@ impl StopwatchMode {
     }
 }
 
-impl Default for StopwatchMode {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Mode for StopwatchMode {
     fn display_mode(&self) -> DisplayMode {
         DisplayMode::Stopwatch
@@ -148,9 +142,7 @@ impl Mode for StopwatchMode {
         let lap_area = chunks[4];
         if !self.laps.is_empty() {
             let start_lap = self.laps.len().saturating_sub(5);
-            let displayed_laps: Vec<u64> = self.laps[start_lap..].to_vec();
-
-            for (i, &lap_ms) in displayed_laps.iter().enumerate() {
+            for (i, &lap_ms) in self.laps[start_lap..].iter().enumerate() {
                 let lap_secs = lap_ms / 1000;
                 let lap_m = lap_secs / 60;
                 let lap_s = lap_secs % 60;

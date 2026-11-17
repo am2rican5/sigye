@@ -1,7 +1,7 @@
 //! Timer display mode.
 
 use std::any::Any;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -97,7 +97,9 @@ impl Mode for TimerMode {
 
         let elapsed_secs = self.last_tick.elapsed().as_secs() as u32;
         if elapsed_secs >= 1 {
-            self.last_tick = Instant::now();
+            // Advance by the whole seconds consumed, keeping the fraction for the next
+            // tick. Resetting to `now` would drop it and run the timer slow.
+            self.last_tick += Duration::from_secs(elapsed_secs.into());
 
             if self.remaining_secs > elapsed_secs {
                 self.remaining_secs -= elapsed_secs;
@@ -210,5 +212,23 @@ impl Mode for TimerMode {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tick_keeps_the_fraction_of_a_second_it_did_not_consume() {
+        let mut ctx = RenderContext::for_test();
+        let mut timer = TimerMode::new(1);
+        timer.toggle();
+        timer.last_tick = Instant::now() - Duration::from_millis(1900);
+
+        timer.update(&mut ctx);
+
+        assert_eq!(timer.remaining_secs, 59);
+        assert!(timer.last_tick.elapsed() >= Duration::from_millis(900));
     }
 }

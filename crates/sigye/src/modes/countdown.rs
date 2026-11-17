@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, TimeZone};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -31,12 +31,6 @@ impl CountdownMode {
 
     fn events<'a>(&self, ctx: &'a RenderContext) -> &'a [CountdownEvent] {
         &ctx.config.countdown_events
-    }
-}
-
-impl Default for CountdownMode {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -127,15 +121,8 @@ fn compute_event_view(event: &CountdownEvent) -> EventView {
         target_dt.format("%A, %B %-d, %Y · %H:%M").to_string()
     };
 
-    // For `since` events we reverse the frame: "now - target" positive after target, negative before.
-    let (signed_secs, variant_since) = if event.since {
-        ((now - target_dt).num_seconds(), true)
-    } else {
-        ((target_dt - now).num_seconds(), false)
-    };
-
     // If target is the same calendar day, surface "today" for emotional clarity.
-    if !variant_since && target.date_only && now.date_naive() == target_dt.date_naive() {
+    if !event.since && target.date_only && now.date_naive() == target_dt.date_naive() {
         return EventView {
             big_text: "TODAY".to_string(),
             status: event.name.clone(),
@@ -143,71 +130,35 @@ fn compute_event_view(event: &CountdownEvent) -> EventView {
         };
     }
 
-    if signed_secs >= 0 {
-        // Future target in countdown mode, or elapsed time in since mode.
-        if signed_secs >= 86_400 {
-            let days = signed_secs / 86_400;
-            let unit = if days == 1 { "day" } else { "days" };
-            let status = if variant_since {
-                format!("{unit} since {}", event.name)
-            } else {
-                format!("{unit} until {}", event.name)
-            };
-            EventView {
-                big_text: days.to_string(),
-                status,
-                target_label: date_label,
-            }
-        } else {
-            // Under 24h: show HH:MM:SS for tangible urgency.
-            let h = signed_secs / 3600;
-            let m = (signed_secs % 3600) / 60;
-            let s = signed_secs % 60;
-            let status = if variant_since {
-                format!("since {}", event.name)
-            } else {
-                format!("until {}", event.name)
-            };
-            EventView {
-                big_text: format!("{h:02}:{m:02}:{s:02}"),
-                status,
-                target_label: date_label,
-            }
-        }
+    // The direction shown follows the clock, not the `since` flag: a target still
+    // ahead reads "until" and one already behind reads "since", whichever was set.
+    let remaining = (target_dt - now).num_seconds();
+    let direction = if remaining > 0 || (remaining == 0 && !event.since) {
+        "until"
     } else {
-        // Countdown event already passed — flip the narrative.
-        let elapsed = -signed_secs;
-        let days = elapsed / 86_400;
+        "since"
+    };
+    let secs = remaining.abs();
+
+    let (big_text, status) = if secs >= 86_400 {
+        let days = secs / 86_400;
         let unit = if days == 1 { "day" } else { "days" };
-        let (big, status) = if variant_since {
-            // Future date configured as "since" — treat as "starts in".
-            if elapsed >= 86_400 {
-                (days.to_string(), format!("{unit} until {}", event.name))
-            } else {
-                let h = elapsed / 3600;
-                let m = (elapsed % 3600) / 60;
-                let s = elapsed % 60;
-                (
-                    format!("{h:02}:{m:02}:{s:02}"),
-                    format!("until {}", event.name),
-                )
-            }
-        } else if elapsed >= 86_400 {
-            (days.to_string(), format!("{unit} since {}", event.name))
-        } else {
-            let h = elapsed / 3600;
-            let m = (elapsed % 3600) / 60;
-            let s = elapsed % 60;
-            (
-                format!("{h:02}:{m:02}:{s:02}"),
-                format!("since {}", event.name),
-            )
-        };
-        EventView {
-            big_text: big,
-            status,
-            target_label: date_label,
-        }
+        (
+            days.to_string(),
+            format!("{unit} {direction} {}", event.name),
+        )
+    } else {
+        // Under 24h: show HH:MM:SS for tangible urgency.
+        let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+        (
+            format!("{h:02}:{m:02}:{s:02}"),
+            format!("{direction} {}", event.name),
+        )
+    };
+    EventView {
+        big_text,
+        status,
+        target_label: date_label,
     }
 }
 
@@ -264,11 +215,13 @@ impl CountdownMode {
 
         render::render_centered_text(frame, chunks[7], "── A few ideas ──", dim);
 
-        let examples: [(&str, &str, &str); 4] = [
-            ("Launch", "2026-06-01", "until"),
-            ("Birthday", "2026-09-15", "until"),
-            ("Trip to Tokyo", "2026-08-04", "until"),
-            ("Sober", "2023-02-14", "since"),
+        // Dated next year so the "until" examples never read as already past.
+        let next_year = Local::now().year() + 1;
+        let examples = [
+            ("Launch", format!("{next_year}-06-01"), "until"),
+            ("Birthday", format!("{next_year}-09-15"), "until"),
+            ("Trip to Tokyo", format!("{next_year}-08-04"), "until"),
+            ("Sober", "2023-02-14".to_string(), "since"),
         ];
         let example_lines: Vec<Line> = examples
             .iter()
@@ -394,46 +347,21 @@ impl Mode for CountdownMode {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use ratatui::{Terminal, backend::TestBackend};
-    use sigye_config::Config;
-    use sigye_fonts::FontRegistry;
 
     use super::*;
-
-    fn render_context(screensaver_mode: bool) -> RenderContext {
-        let config = Config::default();
-        RenderContext {
-            time_format: config.time_format,
-            color_theme: config.color_theme,
-            animation_style: config.animation_style,
-            animation_speed: config.animation_speed,
-            colon_blink: config.colon_blink,
-            show_seconds: config.show_seconds,
-            background_style: config.background_style,
-            current_font: config.font_name.clone(),
-            font_registry: FontRegistry::new(),
-            on_complete_command: config.on_complete.clone(),
-            config,
-            animation_start: Instant::now(),
-            flash_intensity: 0.0,
-            flash_start: None,
-            screensaver_mode,
-            desktop_notifications: false,
-            sunrise_sunset: None,
-        }
-    }
+    use crate::dialog::test_helpers::contains_text;
 
     #[test]
     fn onboarding_hides_settings_hint_in_screensaver_mode() {
         let mut terminal = Terminal::new(TestBackend::new(100, 35)).unwrap();
         let mode = CountdownMode::new();
-        let ctx = render_context(true);
+        let mut ctx = RenderContext::for_test();
+        ctx.screensaver_mode = true;
 
         terminal.draw(|frame| mode.render(frame, &ctx)).unwrap();
 
-        assert!(!buffer_contains_text(terminal.backend(), "[s] settings"));
+        assert!(!contains_text(terminal.backend(), "[s] settings"));
     }
 
     #[test]
@@ -462,7 +390,7 @@ mod tests {
 
     #[test]
     fn future_date_shows_days() {
-        // A date ~365 days out; exact count depends on now, so just check format is digits.
+        // A date 100 days out; exact count depends on now, so just check format is digits.
         let far_future = Local::now()
             .date_naive()
             .checked_add_signed(chrono::Duration::days(100))
@@ -494,6 +422,37 @@ mod tests {
     }
 
     #[test]
+    fn direction_follows_the_clock_whichever_way_the_event_was_configured() {
+        // RFC 3339 targets are exact instants, so DST changes cannot shift the result,
+        // and every offset sits well clear of an hour or day boundary.
+        let view = |offset: chrono::Duration, since: bool| {
+            compute_event_view(&CountdownEvent {
+                name: "X".into(),
+                target: (Local::now() + offset).to_rfc3339(),
+                since,
+            })
+        };
+        let hours = chrono::Duration::minutes(5 * 60 + 30);
+        let days = chrono::Duration::hours(3 * 24 + 12);
+
+        for since in [false, true] {
+            // Under a day: HH:MM:SS toward or away from the target.
+            assert!(view(hours, since).big_text.starts_with("05:"));
+            assert_eq!(view(hours, since).status, "until X");
+            assert!(view(-hours, since).big_text.starts_with("05:"));
+            assert_eq!(view(-hours, since).status, "since X");
+            // A day or more: whole days.
+            assert_eq!(view(days, since).big_text, "3");
+            assert_eq!(view(days, since).status, "days until X");
+            assert_eq!(view(-days, since).status, "days since X");
+        }
+        assert_eq!(
+            view(-chrono::Duration::hours(30), false).status,
+            "day since X"
+        );
+    }
+
+    #[test]
     fn today_is_surfaced() {
         let today = Local::now().date_naive();
         let ev = CountdownEvent {
@@ -504,27 +463,5 @@ mod tests {
         let view = compute_event_view(&ev);
         assert_eq!(view.big_text, "TODAY");
         assert_eq!(view.status, "Birthday");
-    }
-
-    fn buffer_contains_text(backend: &TestBackend, text: &str) -> bool {
-        let buffer = backend.buffer();
-        let area = buffer.area;
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                if text_matches_at(backend, x, y, text) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn text_matches_at(backend: &TestBackend, x: u16, y: u16, text: &str) -> bool {
-        let buffer = backend.buffer();
-        text.chars().enumerate().all(|(offset, ch)| {
-            buffer
-                .cell((x + offset as u16, y))
-                .is_some_and(|cell| cell.symbol() == ch.to_string())
-        })
     }
 }

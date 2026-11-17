@@ -112,7 +112,7 @@ struct Cli {
     #[arg(long)]
     screensaver: bool,
 
-    /// Start in demo mode (auto-cycle themes and backgrounds)
+    /// Start in demo mode (auto-cycle themes, backgrounds, and fonts)
     #[arg(long)]
     demo: bool,
 
@@ -176,9 +176,8 @@ fn main() -> color_eyre::Result<()> {
             "unix" | "timestamp" | "epoch" => now.timestamp().to_string(),
             "iso" | "iso8601" => now.format("%Y-%m-%dT%H:%M:%S%:z").to_string(),
             "hex" => {
-                let h = now.format("%H").to_string().parse::<u32>().unwrap_or(0);
-                let m = now.format("%M").to_string().parse::<u32>().unwrap_or(0);
-                let s = now.format("%S").to_string().parse::<u32>().unwrap_or(0);
+                use chrono::Timelike;
+                let (h, m, s) = (now.hour(), now.minute(), now.second());
                 format!("{h:02X}:{m:02X}:{s:02X}")
             }
             _ => {
@@ -246,11 +245,8 @@ pub struct App {
 }
 
 impl App {
-    /// Construct a new instance of [`App`].
-    // A `Default` impl would only forward to `new()` and is never used; the entry point
-    // always builds via `new_with_cli`.
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    /// Construct a new instance of [`App`] from the saved configuration.
+    fn new() -> Self {
         // Load configuration
         let config = Config::load();
 
@@ -307,7 +303,6 @@ impl App {
             flash_start: None,
             screensaver_mode: false,
             on_complete_command,
-            desktop_notifications: false,
             sunrise_sunset: None,
         };
 
@@ -396,7 +391,6 @@ impl App {
         }
 
         app.ctx.screensaver_mode = cli.screensaver;
-        app.ctx.desktop_notifications = app.ctx.config.desktop_notifications;
         app.demo_mode = cli.demo;
 
         // In screensaver mode with no background, default to Aurora
@@ -531,7 +525,6 @@ impl App {
             frame,
             area,
             color,
-            dim,
             muted,
             self.modes[self.active_mode_index].display_mode(),
         );
@@ -549,7 +542,6 @@ impl App {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key),
                 Event::Mouse(mouse) => self.on_mouse_event(mouse),
-                Event::Resize(_, _) => {}
                 _ => {}
             }
         }
@@ -873,13 +865,6 @@ impl App {
             return;
         }
 
-        let area = frame.area();
-        let width = 56u16.min(area.width.saturating_sub(4));
-        let height = 35u16.min(area.height.saturating_sub(2));
-        let overlay_area = dialog::centered_rect(area, width, height);
-
-        frame.render_widget(Clear, overlay_area);
-
         let accent = self.ctx.color();
         let fg = Color::White;
         let dim = self.ctx.muted_color();
@@ -940,6 +925,13 @@ impl App {
             ))
             .centered(),
         ];
+
+        // Size the overlay to its content (plus borders) so the closing hint is not cut off.
+        let area = frame.area();
+        let width = 56u16.min(area.width.saturating_sub(4));
+        let height = (help_lines.len() as u16 + 2).min(area.height.saturating_sub(2));
+        let overlay_area = dialog::centered_rect(area, width, height);
+        frame.render_widget(Clear, overlay_area);
 
         let help_widget = Paragraph::new(help_lines).block(dialog::dialog_block(" Help ", accent));
 

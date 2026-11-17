@@ -282,8 +282,6 @@ pub fn render_progress_bar(progress: f64, width: u16, accent: Color) -> Line<'st
 mod tests {
     use crossterm::event::KeyCode;
     use ratatui::{Terminal, backend::TestBackend};
-    use sigye_config::Config;
-    use sigye_fonts::FontRegistry;
 
     use super::*;
 
@@ -331,26 +329,7 @@ mod tests {
     #[test]
     fn footer_renders_the_clickable_action_text() {
         let mut terminal = Terminal::new(TestBackend::new(30, 2)).unwrap();
-        let config = Config::default();
-        let ctx = RenderContext {
-            time_format: config.time_format,
-            color_theme: config.color_theme,
-            animation_style: config.animation_style,
-            animation_speed: config.animation_speed,
-            colon_blink: config.colon_blink,
-            show_seconds: config.show_seconds,
-            background_style: config.background_style,
-            current_font: config.font_name.clone(),
-            font_registry: FontRegistry::new(),
-            on_complete_command: config.on_complete.clone(),
-            config,
-            animation_start: std::time::Instant::now(),
-            flash_intensity: 0.0,
-            flash_start: None,
-            screensaver_mode: false,
-            desktop_notifications: false,
-            sunrise_sunset: None,
-        };
+        let ctx = RenderContext::for_test();
         let actions = [FooterAction::new(KeyCode::Char('r'), "r", "reset")];
 
         terminal

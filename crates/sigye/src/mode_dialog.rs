@@ -166,7 +166,6 @@ impl ModeDialog {
         frame: &mut Frame,
         area: Rect,
         accent: Color,
-        _dim: Color,
         muted: Color,
         current: DisplayMode,
     ) {
@@ -337,11 +336,10 @@ mod tests {
         let mut d = ModeDialog::new();
         d.open(DisplayMode::Clock);
         let accent = Color::Red;
-        let dim = Color::Rgb(10, 20, 30);
         let muted = Color::Rgb(40, 50, 60);
 
         terminal
-            .draw(|frame| d.render(frame, frame.area(), accent, dim, muted, DisplayMode::Clock))
+            .draw(|frame| d.render(frame, frame.area(), accent, muted, DisplayMode::Clock))
             .unwrap();
 
         assert_eq!(color_of_text(terminal.backend(), " cancel"), Some(muted));
